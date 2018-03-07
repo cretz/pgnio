@@ -1,0 +1,14 @@
+group 'asyncpg'
+version '0.1.0'
+
+allprojects {
+    apply plugin: 'java'
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
+
+project(':driver') {
+    dependencies {
+        testCompile 'ru.yandex.qatools.embed:postgresql-embedded:2.8'
+    }
+}
