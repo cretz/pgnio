@@ -1,8 +1,9 @@
-/asyncpg.iml
+.classpath
+.project
+.settings
 /.gradle
 /.idea
-.project
-.classpath
-.settings
-/driver/out
+/asyncpg.iml
+/driver/bin
 /driver/build
+/driver/out

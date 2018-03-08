@@ -4,9 +4,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 
 public class StartupConnection extends Connection {
   public static CompletableFuture<StartupConnection> init(Config config) {
+    log.log(Level.FINE, "Connecting to {0}", config.hostname);
     return config.connector.get().thenApply(io -> new StartupConnection(config, io));
   }
 
@@ -15,6 +17,7 @@ public class StartupConnection extends Connection {
   }
 
   public CompletableFuture<QueryReadyConnection.AutoCommit> auth() {
+    log.log(Level.FINE, "{0} Authenticating", ctx);
     // Send startup message
     ctx.buf.clear();
     ctx.bufLengthIntBegin().bufWriteInt(ctx.config.protocolVersion).bufWriteString("user").
@@ -28,16 +31,17 @@ public class StartupConnection extends Connection {
   }
 
   protected CompletableFuture<QueryReadyConnection.AutoCommit> readAuthResponse() {
-    return readBackendMessage().thenCompose(__ -> {
-      assertNotErrorResponse();
+    return readNonGeneralBackendMessage().thenCompose(__ -> {
       char typ = (char) ctx.buf.get();
       if (typ != 'R') throw new IllegalArgumentException("Unrecognized auth response message: " + typ);
       // Skip the length, grab the auth type
       ctx.buf.position(5);
       int authType = ctx.buf.getInt();
+      if (log.isLoggable(Level.FINE))
+        log.log(Level.FINE, "{0} Got auth response of type {1}", new Object[] { ctx, authType });
       switch (authType) {
         // AuthenticationOk
-        case 0: return CompletableFuture.completedFuture(new QueryReadyConnection.AutoCommit(ctx));
+        case 0: return readPostAuthResponse();
         // AuthenticationCleartextPassword
         case 3: return sendClearTextPassword();
         // AuthenticationMD5Password
@@ -72,6 +76,27 @@ public class StartupConnection extends Connection {
     ctx.bufWriteBytes(hash).bufWriteByte((byte) 0).bufLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
+  }
+
+  protected CompletableFuture<QueryReadyConnection.AutoCommit> readPostAuthResponse() {
+    return readNonGeneralBackendMessage().thenCompose(__ -> {
+      char typ = (char) ctx.buf.get();
+      switch (typ) {
+        // BackendKeyData
+        case 'K':
+          ctx.buf.position(5);
+          ctx.processId = ctx.buf.getInt();
+          ctx.secretKey = ctx.buf.getInt();
+          return readPostAuthResponse();
+        // ReadyForQuery
+        case 'Z':
+          ctx.buf.position(5);
+          updateReadyForQueryTransactionStatus();
+          return CompletableFuture.completedFuture(new QueryReadyConnection.AutoCommit(ctx));
+        // TODO: NegotiateProtocolVersion
+        default: throw new IllegalArgumentException("Unrecognized post-auth response type: " + typ);
+      }
+    });
   }
 
   protected CompletableFuture<Void> cancelOther(int processId, int secretKey) {

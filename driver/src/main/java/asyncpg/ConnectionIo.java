@@ -9,6 +9,9 @@ public interface ConnectionIo extends AutoCloseable {
   @Override
   void close() throws RuntimeException;
 
+  // -1 if not connected
+  int getLocalPort();
+
   CompletableFuture<Void> readFull(ByteBuffer buf, long timeout, TimeUnit timeoutUnit);
   CompletableFuture<Void> writeFull(ByteBuffer buf, long timeout, TimeUnit timeoutUnit);
 }

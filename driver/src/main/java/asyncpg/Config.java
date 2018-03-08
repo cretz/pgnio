@@ -20,6 +20,7 @@ public class Config {
   public int bufferStep = 1000;
   public int protocolVersion = 196608;
   public Map<String, String> additionalStartupParams;
+  public boolean logNotices = true;
 
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
       () -> AsynchronousSocketChannelConnectionIo.connect(this);
@@ -42,4 +43,5 @@ public class Config {
     this.additionalStartupParams = additionalStartupParams;
     return this;
   }
+  public Config logNotices(boolean logNotices) { this.logNotices = logNotices; return this; }
 }
