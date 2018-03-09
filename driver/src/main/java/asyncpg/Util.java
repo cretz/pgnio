@@ -6,10 +6,21 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.IdentityHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
 public class Util {
+
+  public static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
+      StandardCharsets.UTF_8.newDecoder().
+          onMalformedInput(CodingErrorAction.REPORT).
+          onUnmappableCharacter(CodingErrorAction.REPORT));
+  public static final ThreadLocal<CharsetEncoder> threadLocalStringEncoder = ThreadLocal.withInitial(() ->
+      StandardCharsets.UTF_8.newEncoder().
+          onMalformedInput(CodingErrorAction.REPORT).
+          onUnmappableCharacter(CodingErrorAction.REPORT));
+
   public static <V> CompletionHandler<V, Void> handlerFromFuture(CompletableFuture<V> fut) {
     return new CompletionHandler<V, Void>() {
       @Override
@@ -32,15 +43,6 @@ public class Util {
       }
     };
   }
-
-  public static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
-      StandardCharsets.UTF_8.newDecoder().
-          onMalformedInput(CodingErrorAction.REPORT).
-          onUnmappableCharacter(CodingErrorAction.REPORT));
-  public static final ThreadLocal<CharsetEncoder> threadLocalStringEncoder = ThreadLocal.withInitial(() ->
-      StandardCharsets.UTF_8.newEncoder().
-          onMalformedInput(CodingErrorAction.REPORT).
-          onUnmappableCharacter(CodingErrorAction.REPORT));
 
   static final char[] hexChars = "0123456789abcdef".toCharArray();
   public static byte[] md5Hex(MessageDigest md5, byte[]... byteArrays) {

@@ -43,6 +43,7 @@ public abstract class QueryMessage {
 
   public static class RowMeta extends QueryMessage {
     public final Column[] columns;
+    // Keyed by lowercase column name
     public final Map<String, Column> columnsByName;
 
     public RowMeta(int queryIndex, Column[] columns, Map<String, Column> columnsByName) {
@@ -52,6 +53,7 @@ public abstract class QueryMessage {
     }
 
     public static class Column {
+      public final int index;
       public final String name;
       public final int tableOid;
       public final short columnAttributeNumber;
@@ -60,8 +62,9 @@ public abstract class QueryMessage {
       public final int typeModifier;
       public final boolean formatText;
 
-      public Column(String name, int tableOid, short columnAttributeNumber, int dataTypeOid, short dataTypeSize,
-          int typeModifier, boolean formatText) {
+      public Column(int index, String name, int tableOid, short columnAttributeNumber, int dataTypeOid,
+          short dataTypeSize, int typeModifier, boolean formatText) {
+        this.index = index;
         this.name = name;
         this.tableOid = tableOid;
         this.columnAttributeNumber = columnAttributeNumber;

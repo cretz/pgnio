@@ -2,7 +2,6 @@ package asyncpg;
 
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Spliterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
@@ -93,10 +92,10 @@ public class QueryResultConnection<T extends QueryReadyConnection<T>> extends St
           Map<String, QueryMessage.RowMeta.Column> columnsByName = new HashMap<>(len);
           for (int i = 0; i < len; i++) {
             QueryMessage.RowMeta.Column column = new QueryMessage.RowMeta.Column(
-                ctx.bufReadString(), ctx.buf.getInt(), ctx.buf.getShort(), ctx.buf.getInt(),
+                i, ctx.bufReadString(), ctx.buf.getInt(), ctx.buf.getShort(), ctx.buf.getInt(),
                 ctx.buf.getShort(), ctx.buf.getInt(), ctx.buf.getShort() == 0);
             columns[i] = column;
-            columnsByName.put(column.name, column);
+            columnsByName.put(column.name.toLowerCase(), column);
           }
           lastRowMeta = new QueryMessage.RowMeta(queryCounter, columns, columnsByName);
           return CompletableFuture.completedFuture(lastRowMeta);

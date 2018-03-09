@@ -114,4 +114,13 @@ public abstract class Connection implements AutoCloseable {
       default: throw new IllegalArgumentException("Unrecognized transaction status: " + status);
     }
   }
+
+  public static class ServerException extends DriverException {
+    public final Notice notice;
+
+    public ServerException(Notice notice) {
+      super(notice.toString());
+      this.notice = notice;
+    }
+  }
 }
