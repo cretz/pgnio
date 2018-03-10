@@ -1,6 +1,7 @@
 package asyncpg;
 
 import asyncpg.nio.AsynchronousSocketChannelConnectionIo;
+import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -10,20 +11,21 @@ import java.util.function.Supplier;
 public class Config {
   public String hostname = "localhost";
   public int port = 5432;
-  public String username;
-  public String password;
-  public String database;
+  public String username = "postgres";
+  public @Nullable String password;
+  public @Nullable String database;
   public boolean ssl;
   public long defaultTimeout;
   public TimeUnit defaultTimeoutUnit = TimeUnit.MILLISECONDS;
   public boolean directBuffer = true;
   public int bufferStep = 1000;
   public int protocolVersion = 196608;
-  public Map<String, String> additionalStartupParams;
+  public @Nullable Map<String, String> additionalStartupParams;
   public boolean logNotices = true;
   public boolean preferText = true;
   public ParamWriter paramWriter = ParamWriter.DEFAULT;
 
+  @SuppressWarnings("initialization")
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
       () -> AsynchronousSocketChannelConnectionIo.connect(this);
 
@@ -47,4 +49,9 @@ public class Config {
   }
   public Config logNotices(boolean logNotices) { this.logNotices = logNotices; return this; }
   public Config preferText(boolean preferText) { this.preferText = preferText; return this; }
+  public Config paramWriter(ParamWriter paramWriter) { this.paramWriter = paramWriter; return this; }
+  public Config connector(Supplier<CompletableFuture<? extends ConnectionIo>> connector) {
+    this.connector = connector;
+    return this;
+  }
 }

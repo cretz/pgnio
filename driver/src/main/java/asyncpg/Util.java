@@ -11,10 +11,12 @@ import java.util.function.BiConsumer;
 
 public class Util {
 
+  @SuppressWarnings("type.argument.type.incompatible") // TODO
   public static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
       StandardCharsets.UTF_8.newDecoder().
           onMalformedInput(CodingErrorAction.REPORT).
           onUnmappableCharacter(CodingErrorAction.REPORT));
+  @SuppressWarnings("type.argument.type.incompatible") // TODO
   public static final ThreadLocal<CharsetEncoder> threadLocalStringEncoder = ThreadLocal.withInitial(() ->
       StandardCharsets.UTF_8.newEncoder().
           onMalformedInput(CodingErrorAction.REPORT).

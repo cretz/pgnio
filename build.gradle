@@ -26,3 +26,31 @@ project(':driver') {
         }
     }
 }
+
+// Checker framework integration
+allprojects {
+    configurations {
+        checkerFrameworkCheckerJar { }
+        checkerFrameworkAnnotatedJdk { }
+    }
+
+    dependencies {
+        checkerFrameworkAnnotatedJdk 'org.checkerframework:jdk8:2.4.0'
+        checkerFrameworkCheckerJar 'org.checkerframework:checker:2.4.0'
+        compileOnly 'org.checkerframework:checker-qual:2.4.0'
+        testCompileOnly 'org.checkerframework:checker-qual:2.4.0'
+    }
+
+    compileJava {
+        doFirst {
+            options.compilerArgs = [
+                '-processorpath', configurations.checkerFrameworkCheckerJar.asPath,
+                '-processor', 'org.checkerframework.checker.nullness.NullnessChecker',
+                '-Xmaxerrs', '10000',
+                // Assuming side effect free to prevent multi-field null checks from assuming nullness is changed
+                '-AassumeSideEffectFree',
+                '-Xbootclasspath/p:' + configurations.checkerFrameworkAnnotatedJdk.asPath
+            ]
+        }
+    }
+}

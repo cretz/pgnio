@@ -1,5 +1,8 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.checkerframework.checker.nullness.qual.PolyNull;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -9,12 +12,10 @@ import java.util.stream.Collector;
 
 public class QueryResultConnection<T extends StartedConnection> extends StartedConnection {
 
-  public boolean suspended;
-
   protected final T prevConn;
   protected int queryCounter;
-  protected QueryMessage.RowMeta lastRowMeta;
-  protected boolean done;
+  protected QueryMessage.@Nullable RowMeta lastRowMeta;
+  protected @Nullable QueryMessage doneMessage;
   protected final boolean willEndWithDone;
 
   protected QueryResultConnection(ConnectionContext ctx, T prevConn, boolean willEndWithDone) {
@@ -23,11 +24,15 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
     this.willEndWithDone = willEndWithDone;
   }
 
+  public boolean isDone() { return doneMessage != null; }
+  public boolean isSuspended() { return doneMessage instanceof QueryMessage.PortalSuspended; }
+
   // This consumes bytes from the buf. Result of null means "done"
   protected QueryMessage handleReadMessage() {
     char typ = (char) ctx.buf.get();
     ctx.buf.position(5);
     switch (typ) {
+      // TODO: make some of these enums, only put query counters on the ones that need it
       // CloseComplete
       case '1':
         return new QueryMessage.ParseComplete(queryCounter);
@@ -39,7 +44,6 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
         return new QueryMessage.CloseComplete(queryCounter);
       // CopyDone
       case 'c':
-        // Just skip this
         return new QueryMessage.CopyDone(queryCounter);
       // CopyData
       case 'd':
@@ -48,9 +52,7 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
         return new QueryMessage.CopyData(queryCounter, copyBytes);
       // PortalSuspended
       case 's':
-        // This is "done" like ready-for-query
-        suspended = true;
-        return null;
+        return new QueryMessage.PortalSuspended(queryCounter);
       // ParameterDescription
       case 't':
         int[] paramOids = new int[ctx.buf.getShort()];
@@ -81,7 +83,7 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
         return new QueryMessage.Complete(queryCounter, lastRowMeta, queryType, insertedOid, rowCount);
       // DataRow
       case 'D':
-        byte[][] values = new byte[ctx.buf.getShort()][];
+        byte[]@Nullable [] values = new byte[ctx.buf.getShort()][];
         for (int i = 0; i < values.length; i++) {
           int length = ctx.buf.getInt();
           if (length == -1) values[i] = null;
@@ -95,9 +97,9 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
         return new QueryMessage.Row(queryCounter, lastRowMeta, values);
       // CopyInResponse
       case 'G':
-        // CopyOutResponse
+      // CopyOutResponse
       case 'H':
-        // CopyBothResponse
+      // CopyBothResponse
       case 'W':
         boolean text = ctx.buf.get() == 0;
         boolean[] columnsText = new boolean[ctx.buf.getShort()];
@@ -122,34 +124,35 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
       // ReadyForQuery
       case 'Z':
         updateReadyForQueryTransactionStatus();
-        done = true;
-        return null;
+        return new QueryMessage.PortalSuspended(queryCounter);
       default: throw new IllegalArgumentException("Unrecognized query message type: " + typ);
     }
   }
 
-  // Message is null when this is complete
-  public CompletableFuture<QueryMessage> next() {
-    if (done) return CompletableFuture.completedFuture(null);
+  // Message is null if already done
+  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  public CompletableFuture<@Nullable QueryMessage> next() {
+    if (isDone()) return CompletableFuture.completedFuture(null);
     return readNonGeneralBackendMessage().thenApply(__ -> handleReadMessage()).whenComplete((msg, ex) -> {
       // Up the counter and remove the last meta if complete/errored
-      if (msg == null || msg.isQueryEndingMessage() || ex instanceof DriverException.FromServer) {
+      if (msg.isQueryEndingMessage() || ex instanceof DriverException.FromServer) {
         queryCounter++;
         lastRowMeta = null;
       }
-      // Mark done if the message is null
-      done = msg == null;
+      if (msg.isQueryingDoneMessage()) doneMessage = msg;
     });
   }
 
   // Will return null on "done" or wait...
-  public CompletableFuture<QueryMessage> next(Predicate<QueryMessage> pred) {
-    return next().thenCompose(msg -> pred.test(msg) ? CompletableFuture.completedFuture(msg) : next(pred));
+  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  public CompletableFuture<@Nullable QueryMessage> next(Predicate<QueryMessage> pred) {
+    return next().thenCompose(msg ->
+        msg == null || pred.test(msg) ? CompletableFuture.completedFuture(msg) : next(pred));
   }
 
   // Finds the next message of given type, discarding others. Will end when "done" (returning null) or hang and wait.
   @SuppressWarnings("unchecked")
-  public <U extends QueryMessage> CompletableFuture<U> next(Class<U> messageType) {
+  public <U extends @Nullable QueryMessage> CompletableFuture<U> next(Class<U> messageType) {
     return next(messageType::isInstance).thenApply(msg -> (U) msg);
   }
 
@@ -162,6 +165,7 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
     });
   }
 
+  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
   public <R> CompletableFuture<R> collectRows(Supplier<R> supplier,
       BiConsumer<R, ? super QueryMessage.Row> accumulator) {
     R ret = supplier.get();
@@ -224,11 +228,10 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
 
   public CompletableFuture<T> done() {
     if (!willEndWithDone) return CompletableFuture.completedFuture(prevConn);
-    // If we need to, call done until it is actually done
-    return next().thenCompose(msg -> {
-      if (msg != null) return done();
+    // Consume all until done
+    return next(__ -> false).thenApply(__ -> {
       prevConn.invalid = false;
-      return CompletableFuture.completedFuture(prevConn);
+      return prevConn;
     });
   }
 }

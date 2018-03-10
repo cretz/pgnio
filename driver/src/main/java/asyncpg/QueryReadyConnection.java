@@ -1,11 +1,13 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.concurrent.CompletableFuture;
 
 public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SELF>> extends StartedConnection {
   protected QueryReadyConnection(ConnectionContext ctx) { super(ctx); }
 
-  public TransactionStatus getTransactionStatus() { return ctx.lastTransactionStatus; }
+  public @Nullable TransactionStatus getTransactionStatus() { return ctx.lastTransactionStatus; }
 
   protected CompletableFuture<Void> sendQuery(String sql) {
     ctx.buf.clear();

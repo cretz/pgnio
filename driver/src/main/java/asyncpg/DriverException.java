@@ -14,6 +14,12 @@ public abstract class DriverException extends RuntimeException {
     public NoConversion(Class cls) { super("No conversion defined for " + cls); }
   }
 
+  public static class MissingRowMeta extends DriverException {
+    public MissingRowMeta() {
+      super("Row meta data required but is missing. Usually caused by doing an advanced prepare w/out a describe.");
+    }
+  }
+
   public static class InvalidConvertDataType extends DriverException {
     protected static String oidToString(int oid) {
       String name = DataType.nameForOid(oid);

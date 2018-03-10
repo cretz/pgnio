@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -133,7 +135,7 @@ public class DataType {
     dataTypes.putAll(map);
   }
 
-  public static String nameForOid(int oid) { return dataTypes.get(oid); }
+  public static @Nullable String nameForOid(int oid) { return dataTypes.get(oid); }
 
   private DataType() { }
 }

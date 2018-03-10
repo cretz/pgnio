@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -14,11 +16,12 @@ public class ConnectionContext implements BufWriter {
   protected int bufLastLengthBegin = -1;
   protected final Subscribable<Notice> noticeSubscribable = new Subscribable<>();
   protected final Subscribable<Notification> notificationSubscribable = new Subscribable<>();
-  protected Integer processId;
-  protected Integer secretKey;
+  protected @Nullable Integer processId;
+  protected @Nullable Integer secretKey;
   protected final Map<String, String> runtimeParameters = new HashMap<>();
-  protected QueryReadyConnection.TransactionStatus lastTransactionStatus;
+  protected QueryReadyConnection.@Nullable TransactionStatus lastTransactionStatus;
 
+  @SuppressWarnings("initialization")
   public ConnectionContext(Config config, ConnectionIo io) {
     this.config = config;
     this.io = io;

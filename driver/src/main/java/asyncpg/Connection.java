@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -67,7 +69,7 @@ public abstract class Connection implements AutoCloseable {
   }
 
   // Returns null if not handled here
-  protected CompletableFuture<Void> handleGeneralResponse() {
+  protected @Nullable CompletableFuture<Void> handleGeneralResponse() {
     char typ = (char) ctx.buf.get(0);
     switch (typ) {
       // Throw on error

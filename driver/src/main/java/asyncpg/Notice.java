@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -12,7 +14,7 @@ public class Notice {
     this.fields = fields;
   }
 
-  public String getLocalizedSeverity() { return fields.get(Field.LOCALIZED_SEVERITY.key); }
+  public String getLocalizedSeverity() { return fields.getOrDefault(Field.LOCALIZED_SEVERITY.key, "<no severity>"); }
 
   public Severity getSeverity() {
     String severity = fields.get(Field.SEVERITY.key);
@@ -22,13 +24,13 @@ public class Notice {
     } catch (IllegalArgumentException e) { return Severity.UNKNOWN; }
   }
 
-  public String getCode() { return fields.get(Field.CODE.key); }
+  public String getCode() { return fields.getOrDefault(Field.CODE.key, "<no code>"); }
 
-  public String getMessage() { return fields.get(Field.MESSAGE.key); }
+  public String getMessage() { return fields.getOrDefault(Field.MESSAGE.key, "<no message>"); }
 
   public void log(Logger log) { log(log, null); }
 
-  protected void log(Logger log, ConnectionContext ctx) {
+  protected void log(Logger log, @Nullable ConnectionContext ctx) {
     Level level = getSeverity().toLogLevel();
     if (!log.isLoggable(level)) return;
     if (ctx != null) log.log(level, "[{0}] {1}", new Object[] { ctx, this });

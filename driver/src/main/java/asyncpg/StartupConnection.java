@@ -61,6 +61,7 @@ public class StartupConnection extends Connection {
   }
 
   protected CompletableFuture<QueryReadyConnection.AutoCommit> sendMd5Password(byte... salt) {
+    if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
     // "md5" + md5(md5(password + username) + random-salt))
     ctx.buf.clear();
     ctx.writeByte((byte) 'p').writeLengthIntBegin().

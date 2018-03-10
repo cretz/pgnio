@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.Map;
 
 public abstract class QueryMessage {
@@ -8,15 +10,30 @@ public abstract class QueryMessage {
   protected QueryMessage(int queryIndex) { this.queryIndex = queryIndex; }
 
   protected boolean isQueryEndingMessage() { return false; }
+  protected boolean isQueryingDoneMessage() { return false; }
+
+  public static class PortalSuspended extends QueryMessage {
+    public PortalSuspended(int queryIndex) { super(queryIndex); }
+
+    @Override
+    protected boolean isQueryingDoneMessage() { return true; }
+  }
+
+  public static class ReadyForQuery extends QueryMessage {
+    public ReadyForQuery(int queryIndex) { super(queryIndex); }
+
+    @Override
+    protected boolean isQueryingDoneMessage() { return true; }
+  }
 
   public static class Complete extends QueryMessage {
-    public final RowMeta meta;
+    public final @Nullable RowMeta meta;
     public final QueryType type;
     // 0 if not an insert of a single value
     public final long insertedOid;
     public final long rowCount;
 
-    public Complete(int queryIndex, RowMeta meta, QueryType type, long insertedOid, long rowCount) {
+    public Complete(int queryIndex, @Nullable RowMeta meta, QueryType type, long insertedOid, long rowCount) {
       super(queryIndex);
       this.meta = meta;
       this.type = type;
@@ -50,11 +67,10 @@ public abstract class QueryMessage {
   }
 
   public static class Row extends QueryMessage {
-    // Can be null
-    public final RowMeta meta;
-    public final byte[][] raw;
+    public final @Nullable RowMeta meta;
+    public final byte[]@Nullable [] raw;
 
-    public Row(int queryIndex, RowMeta meta, byte[][] raw) {
+    public Row(int queryIndex, @Nullable RowMeta meta, byte[]@Nullable [] raw) {
       super(queryIndex);
       this.meta = meta;
       this.raw = raw;
