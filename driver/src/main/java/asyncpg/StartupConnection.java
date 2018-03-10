@@ -20,12 +20,12 @@ public class StartupConnection extends Connection {
     log.log(Level.FINE, "{0} Authenticating", ctx);
     // Send startup message
     ctx.buf.clear();
-    ctx.bufLengthIntBegin().bufWriteInt(ctx.config.protocolVersion).bufWriteString("user").
-        bufWriteString(ctx.config.username);
-    if (ctx.config.database != null) ctx.bufWriteString("database").bufWriteString(ctx.config.database);
+    ctx.writeLengthIntBegin().writeInt(ctx.config.protocolVersion).writeString("user").
+        writeString(ctx.config.username);
+    if (ctx.config.database != null) ctx.writeString("database").writeString(ctx.config.database);
     if (ctx.config.additionalStartupParams != null)
-      ctx.config.additionalStartupParams.forEach((k, v) -> ctx.bufWriteString(k).bufWriteString(v));
-    ctx.bufWriteByte((byte) 0).bufLengthIntEnd();
+      ctx.config.additionalStartupParams.forEach((k, v) -> ctx.writeString(k).writeString(v));
+    ctx.writeByte((byte) 0).writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
   }
@@ -55,7 +55,7 @@ public class StartupConnection extends Connection {
   protected CompletableFuture<QueryReadyConnection.AutoCommit> sendClearTextPassword() {
     if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
     ctx.buf.clear();
-    ctx.bufWriteByte((byte) 'p').bufLengthIntBegin().bufWriteString(ctx.config.password).bufLengthIntEnd();
+    ctx.writeByte((byte) 'p').writeLengthIntBegin().writeString(ctx.config.password).writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
   }
@@ -63,8 +63,8 @@ public class StartupConnection extends Connection {
   protected CompletableFuture<QueryReadyConnection.AutoCommit> sendMd5Password(byte... salt) {
     // "md5" + md5(md5(password + username) + random-salt))
     ctx.buf.clear();
-    ctx.bufWriteByte((byte) 'p').bufLengthIntBegin().
-        bufWriteByte((byte) 'm').bufWriteByte((byte) 'd').bufWriteByte((byte) '5');
+    ctx.writeByte((byte) 'p').writeLengthIntBegin().
+        writeByte((byte) 'm').writeByte((byte) 'd').writeByte((byte) '5');
     MessageDigest md5;
     try {
       md5 = MessageDigest.getInstance("MD5");
@@ -73,7 +73,7 @@ public class StartupConnection extends Connection {
         Util.md5Hex(md5, ctx.config.password.getBytes(StandardCharsets.UTF_8),
             ctx.config.username.getBytes(StandardCharsets.UTF_8)),
         salt);
-    ctx.bufWriteBytes(hash).bufWriteByte((byte) 0).bufLengthIntEnd();
+    ctx.writeBytes(hash).writeByte((byte) 0).writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
   }

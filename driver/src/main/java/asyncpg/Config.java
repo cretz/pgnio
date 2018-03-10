@@ -21,6 +21,8 @@ public class Config {
   public int protocolVersion = 196608;
   public Map<String, String> additionalStartupParams;
   public boolean logNotices = true;
+  public boolean preferText = true;
+  public ParamWriter paramWriter = ParamWriter.DEFAULT;
 
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
       () -> AsynchronousSocketChannelConnectionIo.connect(this);
@@ -44,4 +46,5 @@ public class Config {
     return this;
   }
   public Config logNotices(boolean logNotices) { this.logNotices = logNotices; return this; }
+  public Config preferText(boolean preferText) { this.preferText = preferText; return this; }
 }

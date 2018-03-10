@@ -9,7 +9,6 @@ import java.util.function.BiFunction;
 
 import static asyncpg.DataType.UNSPECIFIED;
 import static asyncpg.DataType.VARCHAR;
-import static asyncpg.DataType.nameForOid;
 
 public class RowReader {
 
@@ -22,6 +21,7 @@ public class RowReader {
     Map<String, BiFunction<QueryMessage.RowMeta.Column, byte[], ?>> def = new HashMap<>();
     // BiFunction<QueryMessage.RowMeta.Column, byte[], ?> temp;
     def.put(String.class.getName(), RowReader::convertString);
+    // TODO: add more converters to def
     DEFAULT_CONVERTERS = Collections.unmodifiableMap(def);
     DEFAULT = new RowReader(def, false);
   }
@@ -33,9 +33,9 @@ public class RowReader {
   }
 
   public RowReader(Map<String, BiFunction<QueryMessage.RowMeta.Column, byte[], ?>> converters,
-      boolean prefixDefaults) {
+      boolean prependDefaults) {
     Map<String, BiFunction<QueryMessage.RowMeta.Column, byte[], ?>> map;
-    if (prefixDefaults) {
+    if (prependDefaults) {
       map = new HashMap<>(DEFAULT_CONVERTERS.size() + converters.size());
       map.putAll(DEFAULT_CONVERTERS);
     } else {
@@ -47,22 +47,21 @@ public class RowReader {
 
   public <T> T get(QueryMessage.Row row, String colName, Class<T> typ) {
     QueryMessage.RowMeta.Column col = row.meta.columnsByName.get(colName.toLowerCase());
-    if (col == null) throw new ColumnNotPresentException("No column for name " + colName);
-    return get(row, col, row.raw[col.index], typ);
+    if (col == null) throw new DriverException.ColumnNotPresent("No column for name " + colName);
+    return get(col, row.raw[col.index], typ);
   }
 
   public <T> T get(QueryMessage.Row row, int colIndex, Class<T> typ) {
     if (colIndex < 0 || colIndex > row.raw.length)
-      throw new ColumnNotPresentException("No column at index " + colIndex);
-    return get(row, row.meta.columns[colIndex], row.raw[colIndex], typ);
+      throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
+    return get(row.meta.columns[colIndex], row.raw[colIndex], typ);
   }
 
-  public <T> T get(QueryMessage.Row row, QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
+  @SuppressWarnings("unchecked")
+  public <T> T get(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
     BiFunction<QueryMessage.RowMeta.Column, byte[], ?> fn = converters.get(typ.getName());
-    if (fn == null) throw new NoConversionException(typ);
-    @SuppressWarnings("unchecked")
-    T ret = (T) fn.apply(col, bytes);
-    return ret;
+    if (fn == null) throw new DriverException.NoConversion(typ);
+    return (T) fn.apply(col, bytes);
   }
 
   protected static String convertString(QueryMessage.RowMeta.Column col, byte[] bytes) {
@@ -72,25 +71,8 @@ public class RowReader {
         try {
           return Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(bytes)).toString();
         } catch (CharacterCodingException e) { throw new ConversionFailedException(e); }
-      default: throw new InvalidDataTypeException(String.class, col.dataTypeOid);
+      default: throw new DriverException.InvalidConvertDataType(String.class, col.dataTypeOid);
     }
-  }
-
-  public static class ColumnNotPresentException extends DriverException {
-    public ColumnNotPresentException(String message) { super(message); }
-  }
-
-  public static class NoConversionException extends DriverException {
-    public NoConversionException(Class cls) { super("No conversion defined for " + cls); }
-  }
-
-  public static class InvalidDataTypeException extends DriverException {
-    protected static String oidToString(int oid) {
-      String name = nameForOid(oid);
-      return name == null ? String.valueOf(oid) : name;
-    }
-
-    public InvalidDataTypeException(Class cls, int oid) { super("Cannot convert " + cls + " to " + oidToString(oid)); }
   }
 
   public static class ConversionFailedException extends DriverException {

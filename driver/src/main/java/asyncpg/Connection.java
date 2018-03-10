@@ -21,12 +21,16 @@ public abstract class Connection implements AutoCloseable {
     terminate();
   }
 
+  protected CompletableFuture<Void> sendTerminate() {
+    ctx.buf.clear();
+    ctx.writeByte((byte) 'X').writeLengthIntBegin().writeLengthIntEnd();
+    ctx.buf.flip();
+    return writeFrontendMessage();
+  }
+
   public CompletableFuture<Void> terminate() {
     // Send terminate and close
-    ctx.buf.clear();
-    ctx.bufWriteByte((byte) 'X').bufLengthIntBegin().bufLengthIntEnd();
-    ctx.buf.flip();
-    return writeFrontendMessage().whenComplete((__, ___) -> ctx.io.close());
+    return sendTerminate().whenComplete((__, ___) -> ctx.io.close());
   }
 
   public Subscribable<Notice> notices() { return ctx.noticeSubscribable; }
@@ -41,14 +45,14 @@ public abstract class Connection implements AutoCloseable {
   protected CompletableFuture<Void> readBackendMessage(long timeout, TimeUnit timeoutUnit) {
     ctx.buf.clear();
     // We need 5 bytes to get the type and size
-    ctx.bufEnsureCapacity(5).limit(5);
+    ctx.writeEnsureCapacity(5).limit(5);
     return ctx.io.readFull(ctx.buf, timeout, timeoutUnit).thenCompose(__ -> {
       // Now that we have the size, make sure we have enough capacity to fulfill it and reset the limit
       int messageSize = ctx.buf.getInt(1);
       if (log.isLoggable(Level.FINEST))
         log.log(Level.FINEST, "{0} Read message header of type {1} with size {2}",
             new Object[] { ctx, (char) ctx.buf.get(0), messageSize });
-      ctx.bufEnsureCapacity(messageSize).limit(1 + messageSize);
+      ctx.writeEnsureCapacity(messageSize).limit(1 + messageSize);
       // Fill it with the rest of the message and flip it for use
       return ctx.io.readFull(ctx.buf, timeout, timeoutUnit).thenRun(() -> ctx.buf.flip());
     });
@@ -78,7 +82,7 @@ public abstract class Connection implements AutoCloseable {
           fields.put(b, ctx.bufReadString());
         }
         Notice notice = new Notice(fields);
-        if (typ == 'E') throw new ServerException(notice);
+        if (typ == 'E') throw new DriverException.FromServer(notice);
         return notices().publish(notice);
       case 'S':
         // Handle status after skipping length
@@ -115,12 +119,4 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
-  public static class ServerException extends DriverException {
-    public final Notice notice;
-
-    public ServerException(Notice notice) {
-      super(notice.toString());
-      this.notice = notice;
-    }
-  }
 }

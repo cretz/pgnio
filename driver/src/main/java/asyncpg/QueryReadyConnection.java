@@ -2,45 +2,47 @@ package asyncpg;
 
 import java.util.concurrent.CompletableFuture;
 
-public abstract class QueryReadyConnection<T extends QueryReadyConnection<T>> extends StartedConnection {
-  // True when inside a query or something similar
-  protected boolean invalid;
-
+public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SELF>> extends StartedConnection {
   protected QueryReadyConnection(ConnectionContext ctx) { super(ctx); }
 
   public TransactionStatus getTransactionStatus() { return ctx.lastTransactionStatus; }
 
-  protected void assertValid() {
-    if (invalid) throw new IllegalStateException("Not ready for queries");
+  protected CompletableFuture<Void> sendQuery(String sql) {
+    ctx.buf.clear();
+    ctx.writeByte((byte) 'Q').writeLengthIntBegin().writeString(sql).writeLengthIntEnd();
+    ctx.buf.flip();
+    return writeFrontendMessage();
   }
 
-  public CompletableFuture<QueryResultConnection<T>> simpleQuery(String sql) {
+  @SuppressWarnings("unchecked")
+  public CompletableFuture<QueryResultConnection<SELF>> simpleQuery(String sql) {
     assertValid();
     invalid = true;
-    // Send Query message
+    return sendQuery(sql).thenApply(__ -> new QueryResultConnection<>(ctx, (SELF) this, true));
+  }
+
+  protected CompletableFuture<Void> sendParse(String statementName, String sql, int... parameterDataTypes) {
     ctx.buf.clear();
-    ctx.bufWriteByte((byte) 'Q').bufLengthIntBegin().bufWriteString(sql).bufLengthIntEnd();
+    ctx.writeByte((byte) 'P').writeLengthIntBegin().writeString(statementName).writeString(sql).
+        writeShort((short) parameterDataTypes.length);
+    for (int parameterDataType : parameterDataTypes) ctx.writeInt(parameterDataType);
+    ctx.writeLengthIntEnd();
     ctx.buf.flip();
-    @SuppressWarnings("unchecked")
-    CompletableFuture<QueryResultConnection<T>> ret =
-        writeFrontendMessage().thenApply(__ -> new QueryResultConnection<>(ctx, (T) this));
-    return ret;
+    return writeFrontendMessage();
   }
 
-  public CompletableFuture<PreparedConnection<T>> prepare(String sql, DataType... parameterDataTypes) {
-    assertValid();
-    throw new UnsupportedOperationException();
+  // Data types are not required here, just allowed
+  @SuppressWarnings("unchecked")
+  public CompletableFuture<QueryBuildConnection.Prepared<SELF>> prepare(String sql, int... parameterDataTypes) {
+    return prepareReusable("", sql, parameterDataTypes);
   }
 
-  public CompletableFuture<PreparedConnection.Reusable<T>> prepareReusable(
-      String name, String sql, DataType... parameterDataTypes) {
+  @SuppressWarnings("unchecked")
+  public CompletableFuture<QueryBuildConnection.Prepared<SELF>> prepareReusable(String statementName,
+      String sql, int... parameterDataTypes) {
     assertValid();
-    throw new UnsupportedOperationException();
-  }
-
-  public CompletableFuture<PreparedConnection.Reusable<T>> reusePrepared(NamedPrepared prepared) {
-    assertValid();
-    throw new UnsupportedOperationException();
+    return sendParse(statementName, sql, parameterDataTypes).
+        thenApply(__ -> new QueryBuildConnection.Prepared<>(ctx, (SELF) this, statementName));
   }
 
   public enum TransactionStatus { IDLE, IN_TRANSACTION, FAILED_TRANSACTION }
@@ -67,9 +69,9 @@ public abstract class QueryReadyConnection<T extends QueryReadyConnection<T>> ex
       throw new UnsupportedOperationException();
     }
 
-    public CompletableFuture<BoundConnection.Reusable> reuseBound(NamedBound bound) {
-      assertValid();
-      throw new UnsupportedOperationException();
-    }
+//    public CompletableFuture<BoundConnection.Reusable> reuseBound(NamedBound bound) {
+//      assertValid();
+//      throw new UnsupportedOperationException();
+//    }
   }
 }

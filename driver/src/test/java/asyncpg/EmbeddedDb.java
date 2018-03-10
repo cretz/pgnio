@@ -32,9 +32,9 @@ public interface EmbeddedDb extends AutoCloseable {
     Config dbConf;
     List<String> additionalParams = Arrays.asList("-E", "SQL_ASCII", "--locale=C", "--lc-collate=C", "--lc-ctype=C");
 
-    EmbeddedDbConfig dbConf(Config dbConf) { this.dbConf = dbConf; return this; }
+    public EmbeddedDbConfig dbConf(Config dbConf) { this.dbConf = dbConf; return this; }
 
-    EmbeddedDbConfig additionalParams(List<String> additionalParams) {
+    public EmbeddedDbConfig additionalParams(List<String> additionalParams) {
       this.additionalParams = additionalParams;
       return this;
     }

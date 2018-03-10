@@ -7,7 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
-public class ConnectionContext {
+public class ConnectionContext implements BufWriter {
   public final Config config;
   public final ConnectionIo io;
   protected ByteBuffer buf;
@@ -30,7 +30,7 @@ public class ConnectionContext {
     });
   }
 
-  public ByteBuffer bufEnsureCapacity(int needed) {
+  public ByteBuffer writeEnsureCapacity(int needed) {
     if (buf.capacity() - buf.position() < needed) {
       // Round up to the next step and then add it
       int newAmount = (((buf.capacity() + needed) / config.bufferStep) + 1) * config.bufferStep;
@@ -39,45 +39,52 @@ public class ConnectionContext {
     return buf;
   }
 
-  public ConnectionContext bufLengthIntBegin() {
+  @Override
+  public ConnectionContext writeLengthIntBegin() {
     if (bufLastLengthBegin != -1) throw new IllegalStateException("Length already started");
     bufLastLengthBegin = buf.position();
-    return bufWriteInt(0);
+    return writeInt(0);
   }
 
-  public ConnectionContext bufLengthIntEnd() {
+  @Override
+  public ConnectionContext writeLengthIntEnd() {
     if (bufLastLengthBegin == -1) throw new IllegalStateException("Length not started");
     buf.putInt(bufLastLengthBegin, buf.position() - bufLastLengthBegin);
     bufLastLengthBegin = -1;
     return this;
   }
 
-  public ConnectionContext bufWriteByte(byte b) {
-    bufEnsureCapacity(1).put(b);
+  @Override
+  public ConnectionContext writeByte(byte b) {
+    writeEnsureCapacity(1).put(b);
     return this;
   }
 
-  public ConnectionContext bufWriteBytes(byte[] b) {
-    bufEnsureCapacity(b.length).put(b);
+  @Override
+  public ConnectionContext writeBytes(byte[] b) {
+    writeEnsureCapacity(b.length).put(b);
     return this;
   }
 
-  public ConnectionContext bufWriteShort(short s) {
-    bufEnsureCapacity(2).putShort(s);
+  @Override
+  public ConnectionContext writeShort(short s) {
+    writeEnsureCapacity(2).putShort(s);
     return this;
   }
 
-  public ConnectionContext bufWriteInt(int i) {
-    bufEnsureCapacity(4).putInt(i);
+  @Override
+  public ConnectionContext writeInt(int i) {
+    writeEnsureCapacity(4).putInt(i);
     return this;
   }
 
-  public ConnectionContext bufWriteString(String str) {
+  @Override
+  public ConnectionContext writeString(String str) {
     ByteBuffer strBuf;
     try {
       strBuf = Util.threadLocalStringEncoder.get().encode(CharBuffer.wrap(str));
     } catch (CharacterCodingException e) { throw new IllegalArgumentException(e); }
-    bufEnsureCapacity(strBuf.limit() + 1).put(strBuf).put((byte) 0);
+    writeEnsureCapacity(strBuf.limit() + 1).put(strBuf).put((byte) 0);
     return this;
   }
 

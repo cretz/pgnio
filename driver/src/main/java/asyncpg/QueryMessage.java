@@ -7,6 +7,8 @@ public abstract class QueryMessage {
 
   protected QueryMessage(int queryIndex) { this.queryIndex = queryIndex; }
 
+  protected boolean isQueryEndingMessage() { return false; }
+
   public static class Complete extends QueryMessage {
     public final RowMeta meta;
     public final QueryType type;
@@ -22,11 +24,29 @@ public abstract class QueryMessage {
       this.rowCount = rowCount;
     }
 
+    @Override
+    protected boolean isQueryEndingMessage() { return true; }
+
     public enum QueryType { INSERT, DELETE, UPDATE, SELECT, MOVE, FETCH, COPY }
   }
 
   public static class EmptyQuery extends QueryMessage {
-    protected EmptyQuery(int queryIndex) { super(queryIndex); }
+    public EmptyQuery(int queryIndex) { super(queryIndex); }
+
+    @Override
+    protected boolean isQueryEndingMessage() { return true; }
+  }
+
+  public static class ParseComplete extends QueryMessage {
+    public ParseComplete(int queryIndex) { super(queryIndex); }
+  }
+
+  public static class BindComplete extends QueryMessage {
+    public BindComplete(int queryIndex) { super(queryIndex); }
+  }
+
+  public static class CloseComplete extends QueryMessage {
+    public CloseComplete(int queryIndex) { super(queryIndex); }
   }
 
   public static class Row extends QueryMessage {
@@ -76,12 +96,21 @@ public abstract class QueryMessage {
     }
   }
 
-  public static class BeginCopy extends QueryMessage {
+  public static class ParamMeta extends QueryMessage {
+    public final int[] dataTypeOids;
+
+    public ParamMeta(int index, int[] dataTypeOids) {
+      super(index);
+      this.dataTypeOids = dataTypeOids;
+    }
+  }
+
+  public static class CopyBegin extends QueryMessage {
     public final Direction direction;
     public final boolean text;
     public final boolean[] columnsText;
 
-    public BeginCopy(int queryIndex, Direction direction, boolean text, boolean[] columnsText) {
+    public CopyBegin(int queryIndex, Direction direction, boolean text, boolean[] columnsText) {
       super(queryIndex);
       this.direction = direction;
       this.text = text;
@@ -98,5 +127,9 @@ public abstract class QueryMessage {
       super(queryIndex);
       this.bytes = bytes;
     }
+  }
+
+  public static class CopyDone extends QueryMessage {
+    public CopyDone(int queryIndex) { super(queryIndex); }
   }
 }

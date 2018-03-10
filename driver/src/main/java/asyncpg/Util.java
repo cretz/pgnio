@@ -6,7 +6,6 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.IdentityHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
