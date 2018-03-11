@@ -102,6 +102,8 @@ public class ConnectionContext implements BufWriter {
       ret = Util.threadLocalStringDecoder.get().decode(buf).toString();
     } catch (CharacterCodingException e) { throw new IllegalStateException(e); }
     buf.limit(prevLimit);
+    // Read the zero
+    buf.position(buf.position() + 1);
     return ret;
   }
 

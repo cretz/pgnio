@@ -23,10 +23,16 @@ public abstract class DriverException extends RuntimeException {
   public static class InvalidConvertDataType extends DriverException {
     protected static String oidToString(int oid) {
       String name = DataType.nameForOid(oid);
-      return name == null ? String.valueOf(oid) : name;
+      return name == null ? "data-type-#" + oid : name;
     }
 
-    public InvalidConvertDataType(Class cls, int oid) { super("Cannot convert " + cls + " to " + oidToString(oid)); }
+    public InvalidConvertDataType(Class cls, int oid) { super("Cannot convert " + oidToString(oid) + " to " + cls); }
+  }
+
+  public static class ConversionFailed extends DriverException {
+    public ConversionFailed(Class cls, int oid, Throwable cause) {
+      super("Failed converting " + InvalidConvertDataType.oidToString(oid) + " to " + cls, cause);
+    }
   }
 
   public static class FromServer extends DriverException {

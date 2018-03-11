@@ -28,23 +28,62 @@ public abstract class QueryMessage {
 
   public static class Complete extends QueryMessage {
     public final @Nullable RowMeta meta;
-    public final QueryType type;
-    // 0 if not an insert of a single value
-    public final long insertedOid;
-    public final long rowCount;
+    public final String tag;
 
-    public Complete(int queryIndex, @Nullable RowMeta meta, QueryType type, long insertedOid, long rowCount) {
+    // Lazily loaded
+    protected volatile @Nullable QueryType parsedQueryType;
+    // Lazily loaded, 0 if not an insert of a single value
+    protected volatile @Nullable Long insertedOid;
+    // Lazily loaded, -1 means unknown
+    protected volatile @Nullable Long parsedRowCount;
+
+    public Complete(int queryIndex, @Nullable RowMeta meta, String tag) {
       super(queryIndex);
       this.meta = meta;
-      this.type = type;
-      this.insertedOid = insertedOid;
-      this.rowCount = rowCount;
+      this.tag = tag;
+    }
+
+    public synchronized QueryType getQueryType() {
+      if (parsedQueryType == null) {
+        parsedQueryType = QueryType.UNKNOWN;
+        int spaceIndex = tag.indexOf(' ');
+        try {
+          parsedQueryType = QueryType.valueOf(spaceIndex == -1 ? tag : tag.substring(0, spaceIndex));
+        } catch (IllegalArgumentException ignored) { }
+      }
+      return parsedQueryType;
+    }
+
+    public synchronized @Nullable Long getInsertedOid() {
+      if (insertedOid == null) {
+        insertedOid = 0L;
+        if (tag.startsWith("INSERT ")) {
+          try {
+            insertedOid = Long.valueOf(tag.substring(7, tag.indexOf(' ', 7)));
+          } catch (Exception ignored) { }
+        }
+      }
+      return insertedOid == 0L ? null : insertedOid;
+    }
+
+    public synchronized @Nullable Long getRowCount() {
+      if (parsedRowCount == null) {
+        parsedRowCount = -1L;
+        int lastSpaceIndex = tag.lastIndexOf(' ');
+        if (lastSpaceIndex != -1 && tag.length() > lastSpaceIndex + 1 &&
+            tag.charAt(lastSpaceIndex + 1) >= '0' && tag.charAt(lastSpaceIndex + 1) <= '9') {
+          try {
+            parsedRowCount = Long.valueOf(tag.substring(lastSpaceIndex + 1));
+          } catch (NumberFormatException ignored) { }
+        }
+      }
+      return parsedRowCount == -1L ? null : parsedRowCount;
     }
 
     @Override
     protected boolean isQueryEndingMessage() { return true; }
 
-    public enum QueryType { INSERT, DELETE, UPDATE, SELECT, MOVE, FETCH, COPY }
+    public enum QueryType { CREATE, INSERT, DELETE, UPDATE, SELECT, MOVE, FETCH, COPY, UNKNOWN }
   }
 
   public static class EmptyQuery extends QueryMessage {

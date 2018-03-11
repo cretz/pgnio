@@ -3,7 +3,7 @@ package asyncpg;
 import java.util.concurrent.CompletableFuture;
 
 public abstract class QueryBuildConnection
-    <T extends QueryReadyConnection<T>, SELF extends QueryBuildConnection<T, SELF>> extends StartedConnection {
+    <T extends QueryReadyConnection<T>, SELF extends QueryBuildConnection<T, SELF>> extends Connection.Started {
   protected final T prevConn;
 
   protected QueryBuildConnection(ConnectionContext ctx, T prevConn) {

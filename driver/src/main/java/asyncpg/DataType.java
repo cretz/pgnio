@@ -137,5 +137,8 @@ public class DataType {
 
   public static @Nullable String nameForOid(int oid) { return dataTypes.get(oid); }
 
+  // Returns unspecified if unknown
+  public static int normalizeOid(int oid) { return dataTypes.containsKey(oid) ? oid : UNSPECIFIED; }
+
   private DataType() { }
 }

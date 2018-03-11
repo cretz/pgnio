@@ -1,16 +1,16 @@
 package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
-import org.checkerframework.checker.nullness.qual.PolyNull;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
+import java.util.logging.Level;
 import java.util.stream.Collector;
 
-public class QueryResultConnection<T extends StartedConnection> extends StartedConnection {
+public class QueryResultConnection<T extends Connection.Started> extends Connection.Started {
 
   protected final T prevConn;
   protected int queryCounter;
@@ -64,23 +64,8 @@ public class QueryResultConnection<T extends StartedConnection> extends StartedC
       // CommandComplete
       case 'C':
         String tag = ctx.bufReadString();
-        int spaceIndex = tag.indexOf(' ');
-        // XXX: we don't support COPY on PG < 8.2, so we can assume all have row count
-        if (spaceIndex == -1) throw new IllegalStateException("Row count not present for command complete");
-        QueryMessage.Complete.QueryType queryType =
-            QueryMessage.Complete.QueryType.valueOf(tag.substring(0, spaceIndex));
-        tag = tag.substring(spaceIndex + 1);
-        long insertedOid = 0;
-        long rowCount;
-        if (queryType == QueryMessage.Complete.QueryType.INSERT) {
-          spaceIndex = tag.indexOf(' ');
-          if (spaceIndex == -1) throw new IllegalStateException("Insert oid not present for command complete");
-          insertedOid = Long.parseLong(tag.substring(0, spaceIndex));
-          rowCount = Long.parseLong(tag.substring(spaceIndex + 1));
-        } else {
-          rowCount = Long.parseLong(tag);
-        }
-        return new QueryMessage.Complete(queryCounter, lastRowMeta, queryType, insertedOid, rowCount);
+        log.log(Level.FINEST, "Command complete with tag: {0}", tag);
+        return new QueryMessage.Complete(queryCounter, lastRowMeta, tag);
       // DataRow
       case 'D':
         byte[]@Nullable [] values = new byte[ctx.buf.getShort()][];
