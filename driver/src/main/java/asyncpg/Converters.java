@@ -5,6 +5,9 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 
 import static asyncpg.DataType.*;
@@ -64,15 +67,33 @@ public interface Converters {
     public static final Map<String, Converters.To> TO_CONVERTERS;
     public static final Map<String, Converters.From> FROM_CONVERTERS = Collections.emptyMap();
 
+    protected static final DateTimeFormatter TIMESTAMP_FORMAT = new DateTimeFormatterBuilder().
+        parseCaseInsensitive().append(DateTimeFormatter.ISO_LOCAL_DATE).appendLiteral(' ').
+        append(DateTimeFormatter.ISO_LOCAL_TIME).toFormatter();
+    protected static final DateTimeFormatter TIMESTAMPTZ_FORMAT = new DateTimeFormatterBuilder().
+        parseCaseInsensitive().append(DateTimeFormatter.ISO_LOCAL_DATE).appendLiteral(' ').
+        append(DateTimeFormatter.ISO_LOCAL_TIME).appendOffset("+HH:mm", "").toFormatter();
+    protected static final DateTimeFormatter TIMETZ_FORMAT = new DateTimeFormatterBuilder().
+        parseCaseInsensitive().append(DateTimeFormatter.ISO_LOCAL_TIME).
+        appendOffset("+HH:mm", "").toFormatter();
+
     static {
       Map<String, Converters.To> def = new HashMap<>();
+      def.put(byte[].class.getName(), BuiltIn::convertToByteArray);
       def.put(BigDecimal.class.getName(), BuiltIn::convertToBigDecimal);
       def.put(BigInteger.class.getName(), BuiltIn::convertToBigInteger);
+      def.put(ByteBuffer.class.getName(), BuiltIn::convertToByteBuffer);
+      def.put(Character.class.getName(), BuiltIn::convertToCharacter);
       def.put(Double.class.getName(), BuiltIn::convertToDouble);
       def.put(Float.class.getName(), BuiltIn::convertToFloat);
       def.put(Integer.class.getName(), BuiltIn::convertToInteger);
+      def.put(LocalDate.class.getName(), BuiltIn::convertToLocalDate);
+      def.put(LocalDateTime.class.getName(), BuiltIn::convertToLocalDateTime);
+      def.put(LocalTime.class.getName(), BuiltIn::convertToLocalTime);
       def.put(Long.class.getName(), BuiltIn::convertToLong);
       def.put(DataType.Money.class.getName(), BuiltIn::convertToMoney);
+      def.put(OffsetDateTime.class.getName(), BuiltIn::convertToOffsetDateTime);
+      def.put(OffsetTime.class.getName(), BuiltIn::convertToOffsetTime);
       def.put(Short.class.getName(), BuiltIn::convertToShort);
       def.put(String.class.getName(), BuiltIn::convertToString);
       TO_CONVERTERS = Collections.unmodifiableMap(def);
@@ -116,6 +137,34 @@ public interface Converters {
         default:
           return null;
       }
+    }
+
+    public static byte@Nullable[] convertToByteArray(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case BYTEA:
+          String str = convertToString(bytes);
+          if (!str.startsWith("\\x")) throw new IllegalArgumentException("Expected bytea type");
+          return Util.hexToBytes(str.substring(2));
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable ByteBuffer convertToByteBuffer(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      byte[] retBytes = convertToByteArray(dataTypeOid, formatText, bytes);
+      return retBytes == null ? null : ByteBuffer.wrap(retBytes);
+    }
+
+    public static @Nullable Character convertToCharacter(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      // If string isn't a single char, return null which reports error
+      String str = convertToString(dataTypeOid, formatText, bytes);
+      return str == null || str.length() != 1 ? null : str.charAt(0);
     }
 
     public static @Nullable Double convertToDouble(
@@ -164,6 +213,42 @@ public interface Converters {
       }
     }
 
+    public static @Nullable LocalDate convertToLocalDate(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case DATE:
+          return LocalDate.parse(convertToString(bytes), DateTimeFormatter.ISO_LOCAL_DATE);
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable LocalDateTime convertToLocalDateTime(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case TIMESTAMP:
+          return LocalDateTime.parse(convertToString(bytes), TIMESTAMP_FORMAT);
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable LocalTime convertToLocalTime(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case TIME:
+          return LocalTime.parse(convertToString(bytes), DateTimeFormatter.ISO_LOCAL_TIME);
+        default:
+          return null;
+      }
+    }
+
     public static @Nullable Long convertToLong(
         int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
       assertNotBinary(formatText);
@@ -190,6 +275,30 @@ public interface Converters {
       }
     }
 
+    public static @Nullable OffsetDateTime convertToOffsetDateTime(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case TIMESTAMPTZ:
+          return OffsetDateTime.parse(convertToString(bytes), TIMESTAMPTZ_FORMAT);
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable OffsetTime convertToOffsetTime(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case TIMETZ:
+          return OffsetTime.parse(convertToString(bytes), TIMETZ_FORMAT);
+        default:
+          return null;
+      }
+    }
+
     public static @Nullable Short convertToShort(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
       assertNotBinary(formatText);
       switch (dataTypeOid) {
@@ -209,7 +318,13 @@ public interface Converters {
       assertNotBinary(formatText);
       switch (dataTypeOid) {
         case UNSPECIFIED:
+        case TEXT:
         case VARCHAR:
+        case BPCHAR:
+        case NAME:
+        case CHAR:
+        case UUID:
+        case JSON:
           return convertToString(bytes);
         default:
           return null;

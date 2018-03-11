@@ -45,15 +45,34 @@ public class Util {
     };
   }
 
-  static final char[] hexChars = "0123456789abcdef".toCharArray();
+  static final char[] hexArray = "0123456789abcdef".toCharArray();
+
+  public static String bytesToHex(byte[] bytes) {
+    char[] hexChars = new char[bytes.length * 2];
+    for ( int j = 0; j < bytes.length; j++ ) {
+      int v = bytes[j] & 0xFF;
+      hexChars[j * 2] = hexArray[v >>> 4];
+      hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+    }
+    return new String(hexChars);
+  }
+
+  public static byte[] hexToBytes(String hex) {
+    int len = hex.length();
+    byte[] data = new byte[len / 2];
+    for (int i = 0; i < len; i += 2)
+      data[i / 2] = (byte) ((Character.digit(hex.charAt(i), 16) << 4) + Character.digit(hex.charAt(i + 1), 16));
+    return data;
+  }
+
   public static byte[] md5Hex(MessageDigest md5, byte[]... byteArrays) {
     for (byte[] byteArray : byteArrays) md5.update(byteArray);
     byte[] digest = md5.digest();
     byte[] ret = new byte[digest.length * 2];
     for (int i = 0; i < digest.length; i++) {
       int v = digest[i] & 0xFF;
-      ret[i * 2] = (byte) hexChars[v >>> 4];
-      ret[i * 2 + 1] = (byte) hexChars[v & 0x0F];
+      ret[i * 2] = (byte) hexArray[v >>> 4];
+      ret[i * 2 + 1] = (byte) hexArray[v & 0x0F];
     }
     return ret;
   }

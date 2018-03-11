@@ -38,12 +38,9 @@ public abstract class Connection implements AutoCloseable {
     return writeFrontendMessage();
   }
 
-  public CompletableFuture<Void> terminate() {
-    // Send terminate and close
-    return sendTerminate().whenComplete((__, ___) -> ctx.io.close());
-  }
+  public CompletableFuture<Void> terminate() { return sendTerminate().whenComplete((__, ___) -> ctx.io.close()); }
 
-  // Function<? super T, ? extends CompletionStage<U>> fn
+  // Good for use on thenCompose
   public <T> CompletableFuture<T> terminate(T ret) {
     return terminate().thenApply(__ -> ret);
   }
