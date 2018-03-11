@@ -3,17 +3,52 @@ package asyncpg;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 public class RowReaderTest extends DbTestBase {
 
+  /*
+  TODO:
+  - test big integer w/ decimal
+  - test errors
+  - test types not the exact type expected
+  - test negatives, mins, maxes, other oddities (e.g. +/- nan, +/- inf, etc)
+  - test alternative locales
+  */
+
   @Test
-  public void testTypesNormalValues() {
-    assertColChecks("row_reader_test_normal",
-        colCheck("smallint", (short) 123),
-        colCheck("integer", 123));
+  public void testSimpleNumeric() {
+    assertColChecks("row_reader_test_simple_numeric",
+        colCheck("smallint", (short) 100),
+        colCheck("integer", 101),
+        colCheck("bigint", 102L),
+        colCheck("numeric(9, 3)", new BigDecimal("1.030")),
+        colCheck("real", 1.04f),
+        colCheck("double precision", 1.05d),
+        colCheck("smallserial", (short) 106).notNull(),
+        colCheck("serial", 107).notNull(),
+        colCheck("bigserial", 108L).notNull());
+  }
+
+  @Test
+  public void testSimpleMonetary() {
+    assertColChecks("row_reader_test_simple_monetary",
+        colCheck("money", new DataType.Money("$", new BigDecimal("1.01"))),
+        colCheck("money", "'$1.02'", new BigDecimal("1.02")).colName("val_money2"));
+  }
+
+  @Test
+  public void testNull() {
+    assertColChecks("row_reader_test_null",
+        colCheckNull("smallint", Short.class),
+        colCheckNull("integer", Integer.class),
+        colCheckNull("bigint", Long.class),
+        colCheckNull("numeric(9, 3)", BigDecimal.class),
+        colCheckNull("real", Float.class),
+        colCheckNull("double precision", Double.class));
   }
 
   void assertColChecks(String tableName, ColCheck... colChecks) {
@@ -25,7 +60,8 @@ public class RowReaderTest extends DbTestBase {
   }
 
   CompletableFuture<?> createTable(QueryReadyConnection.AutoCommit conn, String name, ColCheck... colChecks) {
-    String cols = Arrays.stream(colChecks).map(c -> c.colName + " " + c.dbType).collect(Collectors.joining(","));
+    String cols = Arrays.stream(colChecks).map(c ->
+        c.colName + " " + c.dbType + (c.nullable ? " NULL" : " NOT NULL")).collect(Collectors.joining(","));
     return conn.simpleQueryExec("CREATE TABLE " + name + "(" + cols + ")");
   }
 
@@ -39,14 +75,9 @@ public class RowReaderTest extends DbTestBase {
             rows.isEmpty() ? null : rows.get(0)));
   }
 
-  @SuppressWarnings("unchecked")
-  <T> void assertColEquals(QueryMessage.Row row, String colName, T expected) {
-    T actual = RowReader.DEFAULT.get(row, colName, (Class<T>) expected.getClass());
-    Assert.assertEquals("Failed matching column: " + colName, expected, actual);
-  }
-
   static <T> ColCheck<T> colCheck(String dbType, T expectedVal) {
-    return colCheck(dbType, expectedVal.toString(), expectedVal);
+    return colCheck(dbType, expectedVal instanceof Number ?
+        expectedVal.toString() : "'" + expectedVal.toString().replace("'", "''") + "'", expectedVal);
   }
 
   @SuppressWarnings("unchecked")
@@ -54,8 +85,15 @@ public class RowReaderTest extends DbTestBase {
     return colCheck(dbType, valAsString, expectedVal, (Class<T>) expectedVal.getClass());
   }
 
+  static <T> ColCheck<T> colCheckNull(String dbType, Class<T> valClass) {
+    return colCheck(dbType, "null", null, valClass);
+  }
+
   static <T> ColCheck<T> colCheck(String dbType, String valAsString, T expectedVal, Class<T> valClass) {
-    return colCheck("val_" + dbType, dbType, valAsString, expectedVal, valClass);
+    char[] safeDbType = dbType.toCharArray();
+    for (int i = 0; i < safeDbType.length; i++)
+      if (!Character.isJavaIdentifierPart(safeDbType[i])) safeDbType[i] = '_';
+    return colCheck("val_" + String.valueOf(safeDbType), dbType, valAsString, expectedVal, valClass);
   }
 
   static <T> ColCheck<T> colCheck(String colName, String dbType, String valAsString, T expectedVal, Class<T> valClass) {
@@ -63,11 +101,12 @@ public class RowReaderTest extends DbTestBase {
   }
 
   static class ColCheck<T> {
-    final String colName;
-    final String dbType;
-    final String valAsString;
-    final T expectedVal;
-    final Class<T> valClass;
+    String colName;
+    String dbType;
+    String valAsString;
+    T expectedVal;
+    Class<T> valClass;
+    boolean nullable = true;
 
     ColCheck(String colName, String dbType, String valAsString, T expectedVal, Class<T> valClass) {
       this.colName = colName;
@@ -81,5 +120,8 @@ public class RowReaderTest extends DbTestBase {
       Assert.assertEquals("Failed col " + colName + " has expected val " + expectedVal + " for type " + valClass,
           expectedVal, RowReader.DEFAULT.get(row, colName, valClass));
     }
+
+    ColCheck<T> colName(String colName) { this.colName = colName; return this; }
+    ColCheck<T> notNull() { nullable = false; return this; }
   }
 }

@@ -2,8 +2,14 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import java.math.BigDecimal;
+import java.text.DecimalFormat;
+import java.text.NumberFormat;
+import java.text.ParseException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 public class DataType {
   public static final int UNSPECIFIED = 0;
@@ -141,4 +147,44 @@ public class DataType {
   public static int normalizeOid(int oid) { return dataTypes.containsKey(oid) ? oid : UNSPECIFIED; }
 
   private DataType() { }
+
+  public static class Money {
+    public static Money fromString(String string) throws ParseException { return fromString(string, null); }
+    public static Money fromString(String string, @Nullable Locale locale) throws ParseException {
+      // Format is like $100 or ($300.00)
+      boolean negative = string.charAt(0) == '(' && string.charAt(string.length() - 1) == ')';
+      if (negative) string = string.substring(1, string.length() - 1);
+      int digitIndex = 0;
+      while (digitIndex < string.length() && !Character.isDigit(string.charAt(digitIndex))) digitIndex++;
+      if (digitIndex == 0 || digitIndex == string.length()) throw new NumberFormatException("Missing symbol or digits");
+      String symbol = string.substring(0, digitIndex);
+      String value = string.substring(digitIndex);
+      DecimalFormat fmt = (DecimalFormat) (locale == null ?
+          NumberFormat.getInstance() : NumberFormat.getInstance(locale));
+      fmt.setParseBigDecimal(true);
+      return new Money(symbol, (BigDecimal) fmt.parse(value));
+    }
+
+    public final String symbol;
+    public final BigDecimal value;
+
+    public Money(String symbol, BigDecimal value) {
+      this.symbol = symbol;
+      this.value = value;
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      Money money = (Money) o;
+      return Objects.equals(symbol, money.symbol) && Objects.equals(value, money.value);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(symbol, value); }
+
+    @Override
+    public String toString() { return symbol + value; }
+  }
 }

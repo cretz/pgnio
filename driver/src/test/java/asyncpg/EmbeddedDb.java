@@ -66,7 +66,7 @@ public interface EmbeddedDb extends AutoCloseable {
 
     @Override
     public void close() {
-      // TODO: hangs open on windows...also, should we delete the data dir here?
+      // TODO: hangs open on non-intellij windows...also, we should delete the data dir here?
       postgres.stop();
     }
   }

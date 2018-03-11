@@ -29,9 +29,15 @@ public abstract class DriverException extends RuntimeException {
     public InvalidConvertDataType(Class cls, int oid) { super("Cannot convert " + oidToString(oid) + " to " + cls); }
   }
 
-  public static class ConversionFailed extends DriverException {
-    public ConversionFailed(Class cls, int oid, Throwable cause) {
+  public static class ConvertToFailed extends DriverException {
+    public ConvertToFailed(Class cls, int oid, Throwable cause) {
       super("Failed converting " + InvalidConvertDataType.oidToString(oid) + " to " + cls, cause);
+    }
+  }
+
+  public static class ConvertFromFailed extends DriverException {
+    public ConvertFromFailed(Class cls, Throwable cause) {
+      super("Failed converting from " + cls, cause);
     }
   }
 

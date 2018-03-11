@@ -2,37 +2,23 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-import static asyncpg.DataType.*;
-
 public class RowReader {
+  public static final Map<String, Converters.To> DEFAULT_CONVERTERS =
+      Collections.unmodifiableMap(Converters.loadAllToConverters());
+  public static final RowReader DEFAULT = new RowReader(DEFAULT_CONVERTERS, false);
 
-  public static final RowReader DEFAULT;
+  protected final Map<String, Converters.To> converters;
 
-  // Keyed by class name
-  public static final Map<String, Converter> DEFAULT_CONVERTERS;
-
-  static {
-    Map<String, Converter> def = new HashMap<>();
-    def.put(Integer.class.getName(), RowReader::convertInteger);
-    def.put(Short.class.getName(), RowReader::convertShort);
-    def.put(String.class.getName(), RowReader::convertString);
-    DEFAULT_CONVERTERS = Collections.unmodifiableMap(def);
-    DEFAULT = new RowReader(def, false);
-  }
-
-  protected final Map<String, Converter> converters;
-
-  public RowReader(Map<String, Converter> converterOverrides) {
+  public RowReader(Map<String, Converters.To> converterOverrides) {
     this(converterOverrides, true);
   }
 
-  public RowReader(Map<String, Converter> converters, boolean prependDefaults) {
-    Map<String, Converter> map;
+  public RowReader(Map<String, Converters.To> converters, boolean prependDefaults) {
+    Map<String, Converters.To> map;
     if (prependDefaults) {
       map = new HashMap<>(DEFAULT_CONVERTERS.size() + converters.size());
       map.putAll(DEFAULT_CONVERTERS);
@@ -56,79 +42,26 @@ public class RowReader {
       throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
     if (row.meta != null) return get(row.meta.columns[colIndex], row.raw[colIndex], typ);
     // No meta data means we use the unspecified type
-    Converter conv = converters.get(typ.getName());
+    Converters.To conv = converters.get(typ.getName());
     if (conv == null) throw new DriverException.NoConversion(typ);
+    byte[] bytes = row.raw[colIndex];
     T ret;
     try {
-      ret = (T) conv.convertNullable(DataType.UNSPECIFIED, true, row.raw[colIndex]);
-    } catch (Exception e) { throw new DriverException.ConversionFailed(typ, DataType.UNSPECIFIED, e); }
-    if (ret == null) throw new DriverException.InvalidConvertDataType(typ, DataType.UNSPECIFIED);
+      ret = (T) conv.convertToNullable(DataType.UNSPECIFIED, true, bytes);
+    } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, DataType.UNSPECIFIED, e); }
+    if (bytes != null && ret == null) throw new DriverException.InvalidConvertDataType(typ, DataType.UNSPECIFIED);
     return ret;
   }
 
   @SuppressWarnings("unchecked")
   public <T> T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
-    Converter conv = converters.get(typ.getName());
+    Converters.To conv = converters.get(typ.getName());
     if (conv == null) throw new DriverException.NoConversion(typ);
     T ret;
     try {
-      ret = (T) conv.convertNullable(col, bytes);
-    } catch (Exception e) { throw new DriverException.ConversionFailed(typ, col.dataTypeOid, e); }
-    if (ret == null) throw new DriverException.InvalidConvertDataType(typ, col.dataTypeOid);
+      ret = (T) conv.convertToNullable(col, bytes);
+    } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
+    if (bytes != null && ret == null) throw new DriverException.InvalidConvertDataType(typ, col.dataTypeOid);
     return ret;
-  }
-
-  protected static void assertNotBinary(boolean formatText) {
-    if (!formatText) throw new UnsupportedOperationException("Binary not supported yet");
-  }
-
-  protected static @Nullable Integer convertInteger(
-      int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-    assertNotBinary(formatText);
-    switch (dataTypeOid) {
-      case UNSPECIFIED:
-      case INT2:
-      case INT4:
-        return Integer.valueOf(convertString(bytes));
-      default: return null;
-    }
-  }
-
-  protected static @Nullable Short convertShort(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-    assertNotBinary(formatText);
-    switch (dataTypeOid) {
-      case UNSPECIFIED:
-      case INT2:
-        return Short.valueOf(convertString(bytes));
-      default: return null;
-    }
-  }
-
-  protected static String convertString(byte[] bytes) throws Exception {
-    return Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(bytes)).toString();
-  }
-
-  protected static @Nullable String convertString(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-    assertNotBinary(formatText);
-    switch (dataTypeOid) {
-      case UNSPECIFIED:
-      case VARCHAR:
-        return convertString(bytes);
-      default: return null;
-    }
-  }
-
-  @FunctionalInterface
-  interface Converter<T> {
-    default @Nullable T convertNullable(QueryMessage.RowMeta.Column column, byte@Nullable [] bytes) throws Exception {
-      return convertNullable(column.dataTypeOid, column.formatText, bytes);
-    }
-
-    default @Nullable T convertNullable(int dataTypeOid, boolean formatText, byte@Nullable [] bytes) throws Exception {
-      return bytes == null ? null : convert(dataTypeOid, formatText, bytes);
-    }
-
-    // If this returns null, it is assumed this cannot decode it
-    @Nullable T convert(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception;
   }
 }
