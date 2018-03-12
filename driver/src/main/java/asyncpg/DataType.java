@@ -148,6 +148,41 @@ public class DataType {
   // Returns unspecified if unknown
   public static int normalizeOid(int oid) { return dataTypes.containsKey(oid) ? oid : UNSPECIFIED; }
 
+  // Either the non-array form or unspecified
+  public static int arrayComponentOid(int oid) {
+    switch (oid) {
+      case INT2_ARRAY: return INT2;
+      case INT4_ARRAY: return INT4;
+      case INT8_ARRAY: return INT8;
+      case TEXT_ARRAY: return TEXT;
+      case NUMERIC_ARRAY: return NUMERIC;
+      case FLOAT4_ARRAY: return FLOAT4;
+      case FLOAT8_ARRAY: return FLOAT8;
+      case BOOL_ARRAY: return BOOL;
+      case DATE_ARRAY: return DATE;
+      case TIME_ARRAY: return TIME;
+      case TIMETZ_ARRAY: return TIMETZ;
+      case TIMESTAMP_ARRAY: return TIMESTAMP;
+      case TIMESTAMPTZ_ARRAY: return TIMESTAMPTZ;
+      case BYTEA_ARRAY: return BYTEA;
+      case VARCHAR_ARRAY: return VARCHAR;
+      case OID_ARRAY: return OID;
+      case BPCHAR_ARRAY: return BPCHAR;
+      case MONEY_ARRAY: return MONEY;
+      case NAME_ARRAY: return NAME;
+      case BIT_ARRAY: return BIT;
+      case INTERVAL_ARRAY: return INTERVAL;
+      case CHAR_ARRAY: return CHAR;
+      case VARBIT_ARRAY: return VARBIT;
+      case UUID_ARRAY: return UUID;
+      case XML_ARRAY: return XML;
+      case POINT_ARRAY: return POINT;
+      case JSON_ARRAY: return JSON;
+      case REF_CURSOR_ARRAY: return REF_CURSOR;
+      default: return UNSPECIFIED;
+    }
+  }
+
   private DataType() { }
 
   public static class Money {

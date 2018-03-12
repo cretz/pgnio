@@ -59,6 +59,9 @@ public interface Converters {
 
   class BuiltIn implements Converters {
     @Override
+    public double getPriority() { return 0; }
+
+    @Override
     public Map<String, To> loadToConverters() { return TO_CONVERTERS; }
 
     @Override
@@ -82,6 +85,7 @@ public interface Converters {
       def.put(byte[].class.getName(), BuiltIn::convertToByteArray);
       def.put(BigDecimal.class.getName(), BuiltIn::convertToBigDecimal);
       def.put(BigInteger.class.getName(), BuiltIn::convertToBigInteger);
+      def.put(Boolean.class.getName(), BuiltIn::convertToBoolean);
       def.put(ByteBuffer.class.getName(), BuiltIn::convertToByteBuffer);
       def.put(Character.class.getName(), BuiltIn::convertToCharacter);
       def.put(Double.class.getName(), BuiltIn::convertToDouble);
@@ -135,6 +139,18 @@ public interface Converters {
           // We try on numeric and will let the parser fail if there is a decimal
         case NUMERIC:
           return new BigInteger(convertToString(bytes));
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable Boolean convertToBoolean(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case BOOL:
+          return bytes[0] == 't';
         default:
           return null;
       }

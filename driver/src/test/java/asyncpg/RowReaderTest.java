@@ -22,6 +22,9 @@ public class RowReaderTest extends DbTestBase {
     - includes infinity on date types too
   - test alternative locales
   - internal types such as: "char", name
+  - other types:
+    - enums
+    - geom types
   */
 
   @Test
@@ -50,7 +53,8 @@ public class RowReaderTest extends DbTestBase {
     assertColChecks("row_reader_test_simple_character",
         colCheck("varchar(10)", "test1"),
         colCheck("char(10)", "'test2'", "test2     "),
-        colCheck("char(1)", 'Q'));
+        colCheck("char(1)", 'Q'),
+        colCheck("varchar(11)", "a\"quote\""));
   }
 
   @Test
@@ -87,6 +91,13 @@ public class RowReaderTest extends DbTestBase {
   }
 
   @Test
+  public void testSimpleBoolean() {
+    assertColChecks("row_reader_test_simple_boolean",
+        colCheck("boolean", true),
+        colCheck("boolean", false).colName("val_boolean2"));
+  }
+
+  @Test
   public void testNull() {
     assertColChecks("row_reader_test_null",
         colCheckNull("smallint", Short.class),
@@ -105,7 +116,9 @@ public class RowReaderTest extends DbTestBase {
         colCheckNull("time", LocalTime.class),
         colCheckNull("time with time zone", OffsetTime.class),
         colCheckNull("timestamp", LocalDateTime.class),
-        colCheckNull("timestamp with time zone", OffsetDateTime.class));
+        colCheckNull("timestamp with time zone", OffsetDateTime.class),
+        colCheckNull("interval", DataType.Interval.class),
+        colCheckNull("boolean", Boolean.class));
   }
 
   void assertColChecks(String tableName, ColCheck... colChecks) {

@@ -136,9 +136,15 @@ public abstract class QueryMessage {
       public final short dataTypeSize;
       public final int typeModifier;
       public final boolean formatText;
+      public final @Nullable Column arrayParent;
 
       public Column(int index, String name, int tableOid, short columnAttributeNumber, int dataTypeOid,
           short dataTypeSize, int typeModifier, boolean formatText) {
+        this(index, name, tableOid, columnAttributeNumber, dataTypeOid, dataTypeSize, typeModifier, formatText, null);
+      }
+
+      protected Column(int index, String name, int tableOid, short columnAttributeNumber, int dataTypeOid,
+          short dataTypeSize, int typeModifier, boolean formatText, @Nullable Column arrayParent) {
         this.index = index;
         this.name = name;
         this.tableOid = tableOid;
@@ -147,6 +153,12 @@ public abstract class QueryMessage {
         this.dataTypeSize = dataTypeSize;
         this.typeModifier = typeModifier;
         this.formatText = formatText;
+        this.arrayParent = arrayParent;
+      }
+
+      protected Column child(int dataTypeOid) {
+        return new Column(index, name, tableOid, columnAttributeNumber, dataTypeOid,
+            dataTypeSize, typeModifier, formatText, this);
       }
     }
   }
