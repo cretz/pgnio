@@ -3,6 +3,7 @@ package asyncpg;
 import de.flapdoodle.embed.process.config.IRuntimeConfig;
 import ru.yandex.qatools.embed.postgresql.EmbeddedPostgres;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,13 +11,18 @@ import java.nio.file.Paths;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
-public interface EmbeddedDb extends AutoCloseable {
+public interface EmbeddedDb {
   // Initially connected to the "postgres" database regardless of conf
   static EmbeddedDb newFromConfig(EmbeddedDbConfig conf) { return new Yandex(conf); }
 
   EmbeddedDbConfig conf();
+
+  void close();
 
   default java.sql.Connection newJdbcConnection() throws SQLException {
     return newJdbcConnection(conf().dbConf.database);
@@ -66,8 +72,11 @@ public interface EmbeddedDb extends AutoCloseable {
 
     @Override
     public void close() {
-      // TODO: hangs open on non-intellij windows...also, we should delete the data dir here?
+      // TODO: hangs open on non-intellij windows
       postgres.stop();
+      try {
+        Files.walk(dataDir).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
+      } catch (IOException e) { Logger.getAnonymousLogger().log(Level.WARNING, "Unable to delete " + dataDir, e); }
     }
   }
 }

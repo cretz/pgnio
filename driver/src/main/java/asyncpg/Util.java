@@ -6,6 +6,8 @@ import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
@@ -73,6 +75,21 @@ public class Util {
       int v = digest[i] & 0xFF;
       ret[i * 2] = (byte) hexArray[v >>> 4];
       ret[i * 2 + 1] = (byte) hexArray[v & 0x0F];
+    }
+    return ret;
+  }
+
+  public static List<String> splitByChar(String str, char chr) {
+    List<String> ret = new ArrayList<>();
+    int index = 0;
+    while (true) {
+      int newIndex = str.indexOf(chr, index);
+      if (newIndex == -1) {
+        ret.add(str.substring(index));
+        break;
+      }
+      ret.add(str.substring(index, newIndex));
+      index = newIndex + 1;
     }
     return ret;
   }

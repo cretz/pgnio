@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.text.ParseException;
+import java.time.Duration;
+import java.time.Period;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -186,5 +188,59 @@ public class DataType {
 
     @Override
     public String toString() { return symbol + value; }
+  }
+
+  public static class Interval {
+    public final Period datePeriod;
+    public final Duration timeDuration;
+
+    public Interval(Period datePeriod, Duration timeDuration) {
+      this.datePeriod = datePeriod;
+      if (Math.abs(timeDuration.getSeconds()) > 24 * 3600)
+        throw new IllegalArgumentException("Given duration is more than 24 hours: '" + timeDuration + "'");
+      this.timeDuration = timeDuration;
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      Interval interval = (Interval) o;
+      return Objects.equals(datePeriod, interval.datePeriod) && Objects.equals(timeDuration, interval.timeDuration);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(datePeriod, timeDuration); }
+
+    @Override
+    public String toString() {
+      StringBuilder ret = new StringBuilder();
+      if (datePeriod.getYears() != 0) ret.append(datePeriod.getYears()).append(" years ");
+      if (datePeriod.getMonths() != 0) ret.append(datePeriod.getMonths()).append(" mons ");
+      if (datePeriod.getDays() != 0) ret.append(datePeriod.getDays()).append(" days ");
+      if (ret.length() == 0 || !timeDuration.isZero()) {
+        if (timeDuration.isNegative()) ret.append('-');
+        long seconds = Math.abs(timeDuration.getSeconds());
+        long hours = seconds / 3600;
+        if (hours < 10) ret.append('0');
+        ret.append(hours).append(':');
+        seconds %= 3600;
+        long minutes = seconds / 60;
+        if (minutes < 10) ret.append('0');
+        ret.append(minutes).append(':');
+        seconds %= 60;
+        // Algorithm from Duration::toString
+        if (timeDuration.isNegative() && timeDuration.getNano() > 0) seconds--;
+        ret.append(seconds);
+        if (timeDuration.getNano() > 0) {
+          int pos = ret.length();
+          if (timeDuration.isNegative()) ret.append(2 * 1000_000_000L - timeDuration.getNano());
+          else ret.append(timeDuration.getNano() + 1000_000_000L);
+          while (ret.charAt(ret.length() - 1) == '0') ret.setLength(ret.length() - 1);
+          ret.setCharAt(pos, '.');
+        }
+      }
+      return ret.toString().trim();
+    }
   }
 }

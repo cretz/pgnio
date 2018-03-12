@@ -87,6 +87,7 @@ public interface Converters {
       def.put(Double.class.getName(), BuiltIn::convertToDouble);
       def.put(Float.class.getName(), BuiltIn::convertToFloat);
       def.put(Integer.class.getName(), BuiltIn::convertToInteger);
+      def.put(Interval.class.getName(), BuiltIn::convertToInterval);
       def.put(LocalDate.class.getName(), BuiltIn::convertToLocalDate);
       def.put(LocalDateTime.class.getName(), BuiltIn::convertToLocalDateTime);
       def.put(LocalTime.class.getName(), BuiltIn::convertToLocalTime);
@@ -208,6 +209,53 @@ public interface Converters {
         case INT2:
         case INT4:
           return Integer.valueOf(convertToString(bytes));
+        default:
+          return null;
+      }
+    }
+
+    public static @Nullable Interval convertToInterval(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case INTERVAL:
+          // Format: [N year[s]] [N mon[s]] [N day[s]] [ISO 8601 local time]
+          // Empty: ISO 8601 local time
+          String str = convertToString(bytes);
+          List<String> pieces = Util.splitByChar(str, ' ');
+          boolean hasTime = pieces.size() % 2 == 1;
+          int datePieceMax = hasTime ? pieces.size() - 1 : pieces.size();
+          int years = 0, mons = 0, days = 0;
+          for (int i = 0; i < datePieceMax; i += 2) {
+            int val = Integer.parseInt(pieces.get(i));
+            switch (pieces.get(i + 1)) {
+              case "year":
+              case "years":
+                years = val;
+                break;
+              case "mon":
+              case "mons":
+                mons = val;
+                break;
+              case "day":
+              case "days":
+                days = val;
+                break;
+              default:
+                throw new IllegalArgumentException("Unrecognized piece '" + pieces.get(i + 1) + "' in '" + str + "'");
+            }
+          }
+          Duration timeDuration = Duration.ZERO;
+          if (hasTime) {
+            String timePiece = pieces.get(pieces.size() - 1);
+            boolean negative = timePiece.charAt(0) == '-';
+            if (negative) timePiece = timePiece.substring(1);
+            LocalTime parsed = LocalTime.parse(timePiece, DateTimeFormatter.ISO_LOCAL_TIME);
+            timeDuration = Duration.ofSeconds(negative ? -parsed.toSecondOfDay() : parsed.toSecondOfDay(),
+                negative ? -parsed.getNano() : parsed.getNano());
+          }
+          return new Interval(Period.of(years, mons, days), timeDuration);
         default:
           return null;
       }

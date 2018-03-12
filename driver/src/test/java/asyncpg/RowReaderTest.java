@@ -19,6 +19,7 @@ public class RowReaderTest extends DbTestBase {
   - test errors
   - test types not the exact type expected
   - test negatives, mins, maxes, other oddities (e.g. +/- nan, +/- inf, etc)
+    - includes infinity on date types too
   - test alternative locales
   - internal types such as: "char", name
   */
@@ -79,7 +80,10 @@ public class RowReaderTest extends DbTestBase {
                 atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()),
         colCheck("timestamp(2) with time zone", "'2018-01-05 00:02:04.23-6:30'",
             OffsetDateTime.of(2018, 1, 5, 0, 2, 4, 230000000, ZoneOffset.ofHoursMinutes(-6, -30)).
-                atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()));
+                atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()),
+        colCheck("interval", new DataType.Interval(Period.of(1, 2, 3), Duration.ofSeconds(4000, 500000))),
+        colCheck("interval", new DataType.Interval(Period.of(-1, -2, -3), Duration.ofSeconds(-4000, -500000))).
+            colName("val_interval2"));
   }
 
   @Test
