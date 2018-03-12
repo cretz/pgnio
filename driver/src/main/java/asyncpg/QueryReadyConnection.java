@@ -8,7 +8,7 @@ import java.util.logging.Level;
 import java.util.stream.Collectors;
 
 public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SELF>> extends Connection.Started {
-  protected QueryReadyConnection(ConnectionContext ctx) { super(ctx); }
+  protected QueryReadyConnection(Context ctx) { super(ctx); }
 
   public @Nullable TransactionStatus getTransactionStatus() { return ctx.lastTransactionStatus; }
 
@@ -71,7 +71,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
   public enum TransactionStatus { IDLE, IN_TRANSACTION, FAILED_TRANSACTION }
 
   public static class AutoCommit extends QueryReadyConnection<AutoCommit> {
-    protected AutoCommit(ConnectionContext ctx) { super(ctx); }
+    protected AutoCommit(Context ctx) { super(ctx); }
 
     public CompletableFuture<InTransaction> beginTransaction() {
       assertValid();
@@ -80,7 +80,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
   }
 
   public static class InTransaction extends QueryReadyConnection<InTransaction> {
-    protected InTransaction(ConnectionContext ctx) { super(ctx); }
+    protected InTransaction(Context ctx) { super(ctx); }
 
     public CompletableFuture<AutoCommit> commitTransaction() {
       assertValid();

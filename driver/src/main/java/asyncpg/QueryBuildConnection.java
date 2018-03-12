@@ -6,7 +6,7 @@ public abstract class QueryBuildConnection
     <T extends QueryReadyConnection<T>, SELF extends QueryBuildConnection<T, SELF>> extends Connection.Started {
   protected final T prevConn;
 
-  protected QueryBuildConnection(ConnectionContext ctx, T prevConn) {
+  protected QueryBuildConnection(Context ctx, T prevConn) {
     super(ctx);
     this.prevConn = prevConn;
   }
@@ -55,7 +55,7 @@ public abstract class QueryBuildConnection
     protected static final boolean[] FORMAT_BINARY_ALL = new boolean[] { false };
     public final String statementName;
 
-    protected Prepared(ConnectionContext ctx, T prevConn, String statementName) {
+    protected Prepared(Context ctx, T prevConn, String statementName) {
       super(ctx, prevConn);
       this.statementName = statementName;
     }
@@ -121,7 +121,7 @@ public abstract class QueryBuildConnection
     protected final Prepared<T> prepared;
     public final String portalName;
 
-    protected Bound(ConnectionContext ctx, T prevConn, Prepared<T> prepared, String portalName) {
+    protected Bound(Context ctx, T prevConn, Prepared<T> prepared, String portalName) {
       super(ctx, prevConn);
       this.prepared = prepared;
       this.portalName = portalName;

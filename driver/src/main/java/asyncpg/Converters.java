@@ -54,7 +54,7 @@ public interface Converters {
 
   @FunctionalInterface
   interface From<T> {
-    void convertFrom(boolean textFormat, T obj, BufWriter buf) throws Exception;
+    void convertFrom(boolean formatText, T obj, BufWriter buf) throws Exception;
   }
 
   class BuiltIn implements Converters {
@@ -68,7 +68,7 @@ public interface Converters {
     public Map<String, From> loadFromConverters() { return FROM_CONVERTERS; }
 
     public static final Map<String, Converters.To> TO_CONVERTERS;
-    public static final Map<String, Converters.From> FROM_CONVERTERS = Collections.emptyMap();
+    public static final Map<String, Converters.From> FROM_CONVERTERS;
 
     protected static final DateTimeFormatter TIMESTAMP_FORMAT = new DateTimeFormatterBuilder().
         parseCaseInsensitive().append(DateTimeFormatter.ISO_LOCAL_DATE).appendLiteral(' ').
@@ -81,31 +81,51 @@ public interface Converters {
         appendOffset("+HH:mm", "").toFormatter();
 
     static {
-      Map<String, Converters.To> def = new HashMap<>();
-      def.put(byte[].class.getName(), BuiltIn::convertToByteArray);
-      def.put(BigDecimal.class.getName(), BuiltIn::convertToBigDecimal);
-      def.put(BigInteger.class.getName(), BuiltIn::convertToBigInteger);
-      def.put(Boolean.class.getName(), BuiltIn::convertToBoolean);
-      def.put(ByteBuffer.class.getName(), BuiltIn::convertToByteBuffer);
-      def.put(Character.class.getName(), BuiltIn::convertToCharacter);
-      def.put(Double.class.getName(), BuiltIn::convertToDouble);
-      def.put(Float.class.getName(), BuiltIn::convertToFloat);
-      def.put(Integer.class.getName(), BuiltIn::convertToInteger);
-      def.put(Interval.class.getName(), BuiltIn::convertToInterval);
-      def.put(LocalDate.class.getName(), BuiltIn::convertToLocalDate);
-      def.put(LocalDateTime.class.getName(), BuiltIn::convertToLocalDateTime);
-      def.put(LocalTime.class.getName(), BuiltIn::convertToLocalTime);
-      def.put(Long.class.getName(), BuiltIn::convertToLong);
-      def.put(DataType.Money.class.getName(), BuiltIn::convertToMoney);
-      def.put(OffsetDateTime.class.getName(), BuiltIn::convertToOffsetDateTime);
-      def.put(OffsetTime.class.getName(), BuiltIn::convertToOffsetTime);
-      def.put(Short.class.getName(), BuiltIn::convertToShort);
-      def.put(String.class.getName(), BuiltIn::convertToString);
-      TO_CONVERTERS = Collections.unmodifiableMap(def);
+      Map<String, Converters.From> from = new HashMap<>();
+      from.put(BigDecimal.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(BigInteger.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Boolean.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Character.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Double.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Float.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Integer.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Interval.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Long.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(DataType.Money.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Short.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(String.class.getName(), BuiltIn::convertFromAnyToString);
+      FROM_CONVERTERS = Collections.unmodifiableMap(from);
+
+      Map<String, Converters.To> to = new HashMap<>();
+      to.put(byte[].class.getName(), BuiltIn::convertToByteArray);
+      to.put(BigDecimal.class.getName(), BuiltIn::convertToBigDecimal);
+      to.put(BigInteger.class.getName(), BuiltIn::convertToBigInteger);
+      to.put(Boolean.class.getName(), BuiltIn::convertToBoolean);
+      to.put(ByteBuffer.class.getName(), BuiltIn::convertToByteBuffer);
+      to.put(Character.class.getName(), BuiltIn::convertToCharacter);
+      to.put(Double.class.getName(), BuiltIn::convertToDouble);
+      to.put(Float.class.getName(), BuiltIn::convertToFloat);
+      to.put(Integer.class.getName(), BuiltIn::convertToInteger);
+      to.put(Interval.class.getName(), BuiltIn::convertToInterval);
+      to.put(LocalDate.class.getName(), BuiltIn::convertToLocalDate);
+      to.put(LocalDateTime.class.getName(), BuiltIn::convertToLocalDateTime);
+      to.put(LocalTime.class.getName(), BuiltIn::convertToLocalTime);
+      to.put(Long.class.getName(), BuiltIn::convertToLong);
+      to.put(DataType.Money.class.getName(), BuiltIn::convertToMoney);
+      to.put(OffsetDateTime.class.getName(), BuiltIn::convertToOffsetDateTime);
+      to.put(OffsetTime.class.getName(), BuiltIn::convertToOffsetTime);
+      to.put(Short.class.getName(), BuiltIn::convertToShort);
+      to.put(String.class.getName(), BuiltIn::convertToString);
+      TO_CONVERTERS = Collections.unmodifiableMap(to);
     }
 
     protected static void assertNotBinary(boolean formatText) {
       if (!formatText) throw new UnsupportedOperationException("Binary not supported yet");
+    }
+
+    public static void convertFromAnyToString(boolean formatText, Object obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      buf.writeString(obj.toString());
     }
 
     public static @Nullable BigDecimal convertToBigDecimal(

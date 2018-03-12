@@ -18,7 +18,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   protected @Nullable QueryMessage doneMessage;
   protected final boolean willEndWithDone;
 
-  protected QueryResultConnection(ConnectionContext ctx, T prevConn, boolean willEndWithDone) {
+  protected QueryResultConnection(Context ctx, T prevConn, boolean willEndWithDone) {
     super(ctx);
     this.prevConn = prevConn;
     this.willEndWithDone = willEndWithDone;

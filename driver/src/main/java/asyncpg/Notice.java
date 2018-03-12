@@ -30,7 +30,7 @@ public class Notice {
 
   public void log(Logger log) { log(log, null); }
 
-  protected void log(Logger log, @Nullable ConnectionContext ctx) {
+  protected void log(Logger log, Connection.@Nullable Context ctx) {
     Level level = getSeverity().toLogLevel();
     if (!log.isLoggable(level)) return;
     if (ctx != null) log.log(level, "[{0}] {1}", new Object[] { ctx, this });

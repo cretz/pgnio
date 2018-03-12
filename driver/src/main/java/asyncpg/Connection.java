@@ -2,6 +2,7 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,9 +25,9 @@ public abstract class Connection implements AutoCloseable {
     return init(config).thenCompose(Startup::auth);
   }
 
-  protected final ConnectionContext ctx;
+  protected final Context ctx;
 
-  protected Connection(ConnectionContext ctx) { this.ctx = ctx; }
+  protected Connection(Context ctx) { this.ctx = ctx; }
 
   @Override
   public void close() { terminate(); }
@@ -131,9 +132,55 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
+  public static class Context extends BufWriter.Simple<Context> {
+    public final Config config;
+    public final ConnectionIo io;
+    protected final Subscribable<Notice> noticeSubscribable = new Subscribable<>();
+    protected final Subscribable<Notification> notificationSubscribable = new Subscribable<>();
+    protected @Nullable Integer processId;
+    protected @Nullable Integer secretKey;
+    protected final Map<String, String> runtimeParameters = new HashMap<>();
+    protected QueryReadyConnection.@Nullable TransactionStatus lastTransactionStatus;
+
+    @SuppressWarnings("initialization")
+    public Context(Config config, ConnectionIo io) {
+      super(config.directBuffer, config.bufferStep);
+      this.config = config;
+      this.io = io;
+      // Add the notice log if we are logging em
+      if (config.logNotices) noticeSubscribable.subscribe(n -> {
+        n.log(log, this);
+        return CompletableFuture.completedFuture(null);
+      });
+    }
+
+    public String bufReadString() {
+      int indexOfZero = buf.position();
+      while (buf.get(indexOfZero) != 0) indexOfZero++;
+      // Temporarily put the limit for decoding
+      int prevLimit = buf.limit();
+      buf.limit(indexOfZero);
+      String ret;
+      try {
+        ret = Util.threadLocalStringDecoder.get().decode(buf).toString();
+      } catch (CharacterCodingException e) { throw new IllegalStateException(e); }
+      buf.limit(prevLimit);
+      // Read the zero
+      buf.position(buf.position() + 1);
+      return ret;
+    }
+
+    // Mostly just for the benefit of loggers
+    @Override
+    public String toString() {
+      return "[" + config.username + "@" + config.hostname + ":" + config.port + "->" +
+          io.getLocalPort() + "/" + config.database + "]";
+    }
+  }
+
   public static class Startup extends Connection {
     protected Startup(Config config, ConnectionIo io) {
-      super(new ConnectionContext(config, io));
+      super(new Context(config, io));
     }
 
     public CompletableFuture<QueryReadyConnection.AutoCommit> auth() {
@@ -229,7 +276,7 @@ public abstract class Connection implements AutoCloseable {
     // True when inside a query or something similar
     protected boolean invalid;
 
-    protected Started(ConnectionContext ctx) { super(ctx); }
+    protected Started(Context ctx) { super(ctx); }
 
     public Subscribable<Notification> notifications() { return ctx.notificationSubscribable; }
 
