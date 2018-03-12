@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,9 +32,16 @@ public class ParamWriter {
   }
 
   @SuppressWarnings("unchecked")
+  protected <@Nullable T> Converters.@Nullable From<? extends T> getConverter(Class<T> typ) {
+    Converters.From conv = converters.get(typ.getName());
+    if (conv != null || typ.getSuperclass() == null) return conv;
+    return (Converters.From<? extends T>) getConverter(typ.getSuperclass());
+  }
+
+  @SuppressWarnings("unchecked")
   public void write(boolean textFormat, Object obj, BufWriter buf) {
     // We don't look up the class list here, we expect the map to have all exact instances
-    Converters.From conv = converters.get(obj.getClass().getName());
+    Converters.From conv = getConverter(obj.getClass());
     if (conv == null) throw new DriverException.NoConversion(obj.getClass());
     try {
       conv.convertFrom(textFormat, obj, buf);

@@ -48,8 +48,15 @@ public class RowReader {
   }
 
   @SuppressWarnings("unchecked")
-  public <@Nullable T> T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
+  protected <@Nullable T> Converters.@Nullable To<? extends T> getConverter(Class<T> typ) {
     Converters.To conv = converters.get(typ.getName());
+    if (conv != null || typ.getSuperclass() == null) return conv;
+    return (Converters.To<? extends T>) getConverter(typ.getSuperclass());
+  }
+
+  @SuppressWarnings("unchecked")
+  public <@Nullable T> T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
+    Converters.To<? extends T> conv = getConverter(typ);
     if (conv == null) {
       // Handle as an array if necessary
       if (typ.isArray()) {

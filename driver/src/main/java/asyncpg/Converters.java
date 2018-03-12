@@ -80,14 +80,21 @@ public interface Converters {
         parseCaseInsensitive().append(DateTimeFormatter.ISO_LOCAL_TIME).
         appendOffset("+HH:mm", "").toFormatter();
 
+    @SuppressWarnings("unchecked")
+    protected static <T> Converters.From typedFrom(Converters.From<T> from) {
+      return (a, b, c) -> from.convertFrom(a, (T) b, c);
+    }
+
     static {
       Map<String, Converters.From> from = new HashMap<>();
+      from.put(byte[].class.getName(), typedFrom(BuiltIn::convertFromByteArray));
       from.put(BigDecimal.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(BigInteger.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Boolean.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(ByteBuffer.class.getName(), typedFrom(BuiltIn::convertFromByteBuffer));
       from.put(Character.class.getName(), BuiltIn::convertFromAnyToString);
-      from.put(Double.class.getName(), BuiltIn::convertFromAnyToString);
-      from.put(Float.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Double.class.getName(), typedFrom(BuiltIn::convertFromDouble));
+      from.put(Float.class.getName(), typedFrom(BuiltIn::convertFromFloat));
       from.put(Integer.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Interval.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Long.class.getName(), BuiltIn::convertFromAnyToString);
@@ -126,6 +133,32 @@ public interface Converters {
     public static void convertFromAnyToString(boolean formatText, Object obj, BufWriter buf) {
       assertNotBinary(formatText);
       buf.writeString(obj.toString());
+    }
+
+    public static void convertFromByteArray(boolean formatText, byte[] obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      buf.writeString("\\x" + Util.bytesToHex(obj));
+    }
+
+    public static void convertFromByteBuffer(boolean formatText, ByteBuffer byteBuf, BufWriter buf) {
+      // We'll follow other Java libs and read remaining on byte buf; but we'll put the position back
+      byte[] bytes = new byte[byteBuf.limit() - byteBuf.position()];
+      int prevPos = byteBuf.position();
+      byteBuf.get(bytes);
+      byteBuf.position(prevPos);
+      convertFromByteArray(formatText, bytes, buf);
+    }
+
+    public static void convertFromDouble(boolean formatText, Double obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      if (obj.isInfinite() || obj.isNaN() || obj.equals(-0.0d)) buf.writeString("'" + obj + "'");
+      else buf.writeString(obj.toString());
+    }
+
+    public static void convertFromFloat(boolean formatText, Float obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      if (obj.isInfinite() || obj.isNaN() || obj.equals(-0.0f)) buf.writeString("'" + obj + "'");
+      else buf.writeString(obj.toString());
     }
 
     public static @Nullable BigDecimal convertToBigDecimal(
