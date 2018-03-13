@@ -6,7 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-public abstract class DbTestBase {
+public abstract class DbTestBase extends TestBase {
   protected static EmbeddedDb db;
 
   @BeforeClass

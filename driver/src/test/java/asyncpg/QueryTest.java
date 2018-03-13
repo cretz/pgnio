@@ -29,7 +29,7 @@ public class QueryTest extends DbTestBase {
       - test alternative locales
       - internal types such as: "char", name
       - other types:
-        - enums
+        - arrays
         - geom types
   */
 
@@ -56,7 +56,7 @@ public class QueryTest extends DbTestBase {
         TypeCheck.of("money", new BigDecimal("1.11"), null).overrideToSql(v -> "'$" + v.toString() + "'"),
         TypeCheck.of("varchar(10)", "test1", "t\"es\"t2", null),
         TypeCheck.of("char(10)", "test3", "t\"es\"t4", null).overrideEquals((exp, act) ->
-          (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
+            (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
         TypeCheck.of("char(1)", 'Q', null),
         TypeCheck.of("bytea", "test5".getBytes(), null).overrideEquals(Arrays::equals),
         TypeCheck.of("bytea", ByteBuffer.wrap("test6".getBytes()), null),
@@ -73,7 +73,11 @@ public class QueryTest extends DbTestBase {
             ZoneOffset.ofHoursMinutes(-6, -30)).atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime(), null),
         TypeCheck.of("interval", new DataType.Interval(Period.of(1, 2, 3), Duration.ofSeconds(4000, 500000)),
             new DataType.Interval(Period.of(-1, -2, -3), Duration.ofSeconds(-4000, -500000)), null),
-        TypeCheck.of("boolean", true, false, null)
+        TypeCheck.of("boolean", true, false, null),
+        TypeCheck.of("mood", "sad", "ok", "happy", null).
+            beforeUse(conn -> conn.simpleQueryExec("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')")).
+            afterUse(conn -> conn.simpleQueryExec("DROP TYPE mood")),
+        TypeCheck.of("point", new DataType.Point(30, 40), null)
     );
   }
 
@@ -83,26 +87,28 @@ public class QueryTest extends DbTestBase {
   @Test
   public void testSimpleQuery() {
     String tableName = "test_simple_query_" + typeCheck.safeName;
-    // Create the table, insert, select, drop table
     QueryMessage.Row row = withConnectionSync(conn ->
-        createTable(conn, tableName).
-            thenCompose(__ -> simpleInsertThenSelect(conn, tableName)).
-            thenCompose(r -> dropTable(conn, tableName).thenApply(__ -> r)));
+        withTable(conn, tableName, c -> simpleInsertThenSelect(c, tableName)));
     assertQueryRow(row);
   }
 
   @Test
   public void testPreparedQuery() {
     String tableName = "test_prepared_query_" + typeCheck.safeName;
-    // Create the table, insert, select, drop table
     QueryMessage.Row row = withConnectionSync(conn ->
-        createTable(conn, tableName).
-            thenCompose(__ -> preparedInsertThenSelect(conn, tableName)).
-            thenCompose(r -> dropTable(conn, tableName).thenApply(__ -> r)));
+        withTable(conn, tableName, c -> preparedInsertThenSelect(c, tableName)));
     assertQueryRow(row);
   }
 
-  CompletableFuture<?> createTable(QueryReadyConnection.AutoCommit conn, String name) {
+  <T> CompletableFuture<T> withTable(QueryReadyConnection.AutoCommit conn, String tableName,
+      Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
+    return beforeUse(conn).
+        thenCompose(c -> createTable(c, tableName)).
+        thenCompose(fn).
+        thenCompose(r -> dropTable(conn, tableName).thenCompose(this::afterUse).thenApply(__ -> r));
+  }
+
+  CompletableFuture<QueryReadyConnection.AutoCommit> createTable(QueryReadyConnection.AutoCommit conn, String name) {
     String[] cols = new String[typeCheck.interestingVals.length];
     for (int i = 0; i < typeCheck.interestingVals.length; i++) {
       boolean nullable = typeCheck.interestingVals[i] == null;
@@ -110,6 +116,22 @@ public class QueryTest extends DbTestBase {
           typeCheck.dbType + (nullable ? " NULL" : " NOT NULL");
     }
     return conn.simpleQueryExec("CREATE TABLE " + name + "(" + String.join(",", cols) + ")");
+  }
+
+  CompletableFuture<QueryReadyConnection.AutoCommit> dropTable(QueryReadyConnection.AutoCommit conn, String name) {
+    return conn.simpleQueryExec("DROP TABLE " + name);
+  }
+
+  CompletableFuture<QueryReadyConnection.AutoCommit> beforeUse(QueryReadyConnection.AutoCommit conn) {
+    if (typeCheck.beforeUse == null) return CompletableFuture.completedFuture(conn);
+    Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> fn = typeCheck.beforeUse;
+    return fn.apply(conn).thenApply(__ -> conn);
+  }
+
+  CompletableFuture<QueryReadyConnection.AutoCommit> afterUse(QueryReadyConnection.AutoCommit conn) {
+    if (typeCheck.afterUse == null) return CompletableFuture.completedFuture(conn);
+    Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> fn = typeCheck.afterUse;
+    return fn.apply(conn).thenApply(__ -> conn);
   }
 
   CompletableFuture<QueryMessage.Row> simpleInsertThenSelect(
@@ -144,10 +166,6 @@ public class QueryTest extends DbTestBase {
           return conn.simpleQueryRows("SELECT * FROM " + tableName);
         }).
         thenApply(rows -> rows.isEmpty() ? null : rows.get(0));
-  }
-
-  CompletableFuture<?> dropTable(QueryReadyConnection.AutoCommit conn, String name) {
-    return conn.simpleQueryExec("DROP TABLE " + name);
   }
 
   void assertQueryRow(QueryMessage.Row row) {
@@ -192,6 +210,8 @@ public class QueryTest extends DbTestBase {
     final String dbType;
     final Class<T> valClass;
     final T[] interestingVals;
+    Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> beforeUse;
+    Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> afterUse;
     BiPredicate<T, T> overrideEquals;
     Function<T, String> overrideToSql;
 
@@ -205,6 +225,16 @@ public class QueryTest extends DbTestBase {
       this.dbType = dbType;
       this.valClass = valClass;
       this.interestingVals = interestingVals;
+    }
+
+    TypeCheck<T> beforeUse(Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> beforeUse) {
+      this.beforeUse = beforeUse;
+      return this;
+    }
+
+    TypeCheck<T> afterUse(Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> afterUse) {
+      this.afterUse = afterUse;
+      return this;
     }
 
     TypeCheck<T> overrideToSql(Function<T, String> overrideToSql) { this.overrideToSql = overrideToSql; return this; }

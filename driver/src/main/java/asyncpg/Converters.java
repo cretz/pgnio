@@ -104,6 +104,7 @@ public interface Converters {
       from.put(DataType.Money.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(OffsetDateTime.class.getName(), typedFrom(BuiltIn::convertFromOffsetDateTime));
       from.put(OffsetTime.class.getName(), typedFrom(BuiltIn::convertFromOffsetTime));
+      from.put(Point.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Short.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(String.class.getName(), BuiltIn::convertFromAnyToString);
       FROM_CONVERTERS = Collections.unmodifiableMap(from);
@@ -126,6 +127,7 @@ public interface Converters {
       to.put(DataType.Money.class.getName(), BuiltIn::convertToMoney);
       to.put(OffsetDateTime.class.getName(), BuiltIn::convertToOffsetDateTime);
       to.put(OffsetTime.class.getName(), BuiltIn::convertToOffsetTime);
+      to.put(Point.class.getName(), BuiltIn::convertToPoint);
       to.put(Short.class.getName(), BuiltIn::convertToShort);
       to.put(String.class.getName(), BuiltIn::convertToString);
       TO_CONVERTERS = Collections.unmodifiableMap(to);
@@ -434,6 +436,24 @@ public interface Converters {
       }
     }
 
+    public static @Nullable Point convertToPoint(
+        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+      assertNotBinary(formatText);
+      switch (dataTypeOid) {
+        case UNSPECIFIED:
+        case POINT:
+          // Format: (x,y)
+          String str = convertToString(bytes);
+          int commaIndex = str.indexOf(',');
+          if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
+            throw new IllegalArgumentException("Unrecognized point format: " + str);
+          return new Point(Integer.parseInt(str.substring(1, commaIndex)),
+              Integer.parseInt(str.substring(commaIndex + 1, str.length() - 1)));
+        default:
+          return null;
+      }
+    }
+
     public static @Nullable Short convertToShort(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
       assertNotBinary(formatText);
       switch (dataTypeOid) {
@@ -451,7 +471,7 @@ public interface Converters {
 
     public static @Nullable String convertToString(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
       assertNotBinary(formatText);
-      switch (dataTypeOid) {
+      switch (DataType.normalizeOid(dataTypeOid)) {
         case UNSPECIFIED:
         case TEXT:
         case VARCHAR:
