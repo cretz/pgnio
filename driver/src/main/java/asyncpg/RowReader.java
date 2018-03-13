@@ -2,8 +2,6 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.lang.reflect.Array;
-import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.util.*;
 
@@ -28,6 +26,19 @@ public class RowReader {
     }
     map.putAll(converters);
     this.converters = Collections.unmodifiableMap(map);
+  }
+
+  public byte@Nullable [] getRaw(QueryMessage.Row row, String colName) {
+    if (row.meta == null) throw new DriverException.MissingRowMeta();
+    QueryMessage.RowMeta.Column col = row.meta.columnsByName.get(colName.toLowerCase());
+    if (col == null) throw new DriverException.ColumnNotPresent("No column for name " + colName);
+    return row.raw[col.index];
+  }
+
+  public byte@Nullable [] getRaw(QueryMessage.Row row, int colIndex) {
+    if (colIndex < 0 || colIndex > row.raw.length)
+      throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
+    return row.raw[colIndex];
   }
 
   public <@Nullable T> T get(QueryMessage.Row row, String colName, Class<T> typ) {
@@ -62,36 +73,36 @@ public class RowReader {
       if (typ.isArray()) {
         if (bytes == null) return null;
         try {
-          return (T) getArray(col, bytes, (Class<@Nullable ?>) typ.getComponentType());
+          return getArray(col, bytes, typ);
         } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
       }
       throw new DriverException.NoConversion(typ);
     }
     T ret;
     try {
-      ret = (T) conv.convertToNullable(col, bytes);
+      ret = conv.convertToNullable(col, bytes);
     } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
     if (bytes != null && ret == null) throw new DriverException.InvalidConvertDataType(typ, col.dataTypeOid);
     return ret;
   }
 
   @SuppressWarnings("unchecked")
-  protected <@Nullable T> T[] getArray(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) throws Exception {
-    Converters.BuiltIn.assertNotBinary(col.formatText);
+  protected <@Nullable T> T getArray(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
+    Converters.BuiltIn.assertNotBinary(col.textFormat);
     List<T> ret = new ArrayList<>();
-    char[] chars = Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(bytes)).array();
+    char[] chars = Util.charsFromBytes(bytes);
     int index = readArray(col, chars, 0, ret, typ);
     if (index != chars.length - 1) throw new IllegalArgumentException("Unexpected chars after array end");
-    return ret.toArray((T[]) Array.newInstance(typ, ret.size()));
+    return (T) ret.toArray();
   }
 
   @SuppressWarnings("unchecked")
   protected <@Nullable T> int readArray(QueryMessage.RowMeta.Column col, char[] chars,
-      int index, List<T> list, Class<T> typ) throws Exception {
-    if (chars.length > index + 1 || chars[index] != '{')
-      throw new IllegalArgumentException("Array must start and end with braces");
+      int index, List<T> list, Class<T> typ) {
+    if (chars.length > index + 1 && chars[index] != '{')
+      throw new IllegalArgumentException("Array must start with brace");
     StringBuilder strBuf = new StringBuilder();
-    index = charsNextNonWhitespace(chars, index + 1);
+    index++;
     QueryMessage.RowMeta.Column subCol = col.child(DataType.arrayComponentOid(col.dataTypeOid));
     // TODO: what if we don't want sub-arrays to be array types...we don't want to look ahead for the end though
     Class subType;
@@ -100,10 +111,9 @@ public class RowReader {
     else throw new IllegalArgumentException("Found sub array but expected type is not object or array type");
     while (chars.length > index && chars[index] != '}') {
       // If we're not the first, expect a comma
-      if (index > 1) {
+      if (!list.isEmpty()) {
         if (chars[index] != ',') throw new IllegalArgumentException("Missing comma");
-        // Skip the comma and whitespace
-        index = charsNextNonWhitespace(chars, ++index);
+        index++;
       }
       // Check null, or quoted string, or sub array, or just value
       if (chars[index] == 'N' && chars.length > index + 4 && chars[index + 1] == 'U' &&
@@ -115,17 +125,15 @@ public class RowReader {
         strBuf.setLength(0);
         index++;
         while (chars.length > index && chars[index] != '"') {
-          char c = chars[index];
-          if (chars[index] != '\\') {
-            if (chars.length <= ++index) throw new IllegalArgumentException("Unexpected end of quote string");
-            c = chars[index];
+          if (chars[index] == '\\') {
+            index++;
+            if (chars.length <= index) break;
           }
-          strBuf.append(c);
+          strBuf.append(chars[index]);
           index++;
         }
         if (chars.length <= index) throw new IllegalArgumentException("Unexpected end of quote string");
-        list.add((T) get(subCol, Util.threadLocalStringEncoder.get().
-            encode(CharBuffer.wrap(strBuf)).array(), subType));
+        list.add((T) get(subCol, Util.bytesFromCharBuffer(CharBuffer.wrap(strBuf)), subType));
         index++;
       } else if (chars[index] == '{') {
         List subList = new ArrayList();
@@ -134,23 +142,15 @@ public class RowReader {
         index++;
         list.add((T) subList.toArray());
       } else {
-        // Just run until the next comma or end brace
+        // // Just run until the next comma or end brace
         int startIndex = index;
-        while (chars.length > index && (chars[index] != ',' && chars[index] != '}')) index++;
+        while (chars.length > index && chars[index] != ',' && chars[index] != '}') index++;
         if (chars.length <= index) throw new IllegalArgumentException("Unexpected value end");
         char[] subChars = Arrays.copyOfRange(chars, startIndex, index);
-        list.add((T) get(subCol, Util.threadLocalStringEncoder.get().
-            encode(CharBuffer.wrap(subChars)).array(), subType));
+        list.add((T) get(subCol, Util.bytesFromCharBuffer(CharBuffer.wrap(subChars)), subType));
       }
-      // Get rid of any whitespace
-      index = charsNextNonWhitespace(chars, index);
     }
     if (chars.length <= index) throw new IllegalArgumentException("Unexpected end");
-    return index;
-  }
-
-  protected int charsNextNonWhitespace(char[] chars, int index) {
-    while (chars.length > index && Character.isWhitespace(index)) index++;
     return index;
   }
 }

@@ -2,7 +2,6 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -160,10 +159,7 @@ public abstract class Connection implements AutoCloseable {
       // Temporarily put the limit for decoding
       int prevLimit = buf.limit();
       buf.limit(indexOfZero);
-      String ret;
-      try {
-        ret = Util.threadLocalStringDecoder.get().decode(buf).toString();
-      } catch (CharacterCodingException e) { throw new IllegalStateException(e); }
+      String ret = Util.stringFromByteBuffer(buf);
       buf.limit(prevLimit);
       // Read the zero
       buf.position(buf.position() + 1);

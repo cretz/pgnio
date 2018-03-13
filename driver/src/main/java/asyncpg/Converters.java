@@ -39,22 +39,35 @@ public interface Converters {
   @FunctionalInterface
   interface To<T> {
     default @Nullable T convertToNullable(
-        QueryMessage.RowMeta.Column column, byte@Nullable [] bytes) throws Exception {
-      return convertToNullable(column.dataTypeOid, column.formatText, bytes);
+        QueryMessage.RowMeta.Column column, byte@Nullable [] bytes) {
+      return convertToNullable(column.dataTypeOid, column.textFormat, bytes);
     }
 
     default @Nullable T convertToNullable(
-        int dataTypeOid, boolean formatText, byte@Nullable [] bytes) throws Exception {
-      return bytes == null ? null : convertTo(dataTypeOid, formatText, bytes);
+        int dataTypeOid, boolean textFormat, byte@Nullable [] bytes) {
+      return bytes == null ? null : convertTo(dataTypeOid, textFormat, bytes);
     }
 
     // If this returns null, it is assumed this cannot decode it
-    @Nullable T convertTo(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception;
+    @Nullable T convertTo(int dataTypeOid, boolean textFormat, byte[] bytes);
   }
 
   @FunctionalInterface
   interface From<T> {
-    void convertFrom(boolean formatText, T obj, BufWriter buf) throws Exception;
+    default boolean mustBeQuotedWhenUsedInSql(T obj) {
+      if (!(obj instanceof Number)) return true;
+      if (obj instanceof Double) {
+        Double dbl = (Double) obj;
+        return dbl.isNaN() || dbl.isInfinite() || dbl.compareTo(-0.0d) == 0;
+      }
+      if (obj instanceof Float) {
+        Float flt = (Float) obj;
+        return flt.isNaN() || flt.isInfinite() || flt.compareTo(-0.0f) == 0;
+      }
+      return false;
+    }
+
+    void convertFrom(boolean textFormat, T obj, BufWriter buf);
   }
 
   class BuiltIn implements Converters {
@@ -133,57 +146,56 @@ public interface Converters {
       TO_CONVERTERS = Collections.unmodifiableMap(to);
     }
 
-    protected static void assertNotBinary(boolean formatText) {
-      if (!formatText) throw new UnsupportedOperationException("Binary not supported yet");
+    protected static void assertNotBinary(boolean textFormat) {
+      if (!textFormat) throw new UnsupportedOperationException("Binary not supported yet");
     }
 
-    public static void convertFromAnyToString(boolean formatText, Object obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromAnyToString(boolean textFormat, Object obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.toString());
     }
 
-    public static void convertFromByteArray(boolean formatText, byte[] obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromByteArray(boolean textFormat, byte[] obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString("\\x" + Util.bytesToHex(obj));
     }
 
-    public static void convertFromByteBuffer(boolean formatText, ByteBuffer byteBuf, BufWriter buf) {
+    public static void convertFromByteBuffer(boolean textFormat, ByteBuffer byteBuf, BufWriter buf) {
       // We'll follow other Java libs and read remaining on byte buf; but we'll put the position back
       byte[] bytes = new byte[byteBuf.limit() - byteBuf.position()];
       int prevPos = byteBuf.position();
       byteBuf.get(bytes);
       byteBuf.position(prevPos);
-      convertFromByteArray(formatText, bytes, buf);
+      convertFromByteArray(textFormat, bytes, buf);
     }
 
-    public static void convertFromLocalDate(boolean formatText, LocalDate obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromLocalDate(boolean textFormat, LocalDate obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.format(DateTimeFormatter.ISO_LOCAL_DATE));
     }
 
-    public static void convertFromLocalDateTime(boolean formatText, LocalDateTime obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromLocalDateTime(boolean textFormat, LocalDateTime obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.format(TIMESTAMP_FORMAT));
     }
 
-    public static void convertFromLocalTime(boolean formatText, LocalTime obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromLocalTime(boolean textFormat, LocalTime obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.format(DateTimeFormatter.ISO_LOCAL_TIME));
     }
 
-    public static void convertFromOffsetDateTime(boolean formatText, OffsetDateTime obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromOffsetDateTime(boolean textFormat, OffsetDateTime obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.format(TIMESTAMPTZ_FORMAT));
     }
 
-    public static void convertFromOffsetTime(boolean formatText, OffsetTime obj, BufWriter buf) {
-      assertNotBinary(formatText);
+    public static void convertFromOffsetTime(boolean textFormat, OffsetTime obj, BufWriter buf) {
+      assertNotBinary(textFormat);
       buf.writeString(obj.format(TIMETZ_FORMAT));
     }
 
-    public static @Nullable BigDecimal convertToBigDecimal(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable BigDecimal convertToBigDecimal(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
@@ -192,18 +204,17 @@ public interface Converters {
         case NUMERIC:
         case FLOAT4:
         case FLOAT8:
-          return new BigDecimal(convertToString(bytes));
+          return new BigDecimal(Util.stringFromBytes(bytes));
         case MONEY:
-          Money money = convertToMoney(dataTypeOid, formatText, bytes);
+          Money money = convertToMoney(dataTypeOid, textFormat, bytes);
           return money == null ? null : money.value;
         default:
           return null;
       }
     }
 
-    public static @Nullable BigInteger convertToBigInteger(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable BigInteger convertToBigInteger(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
@@ -211,15 +222,14 @@ public interface Converters {
         case INT8:
           // We try on numeric and will let the parser fail if there is a decimal
         case NUMERIC:
-          return new BigInteger(convertToString(bytes));
+          return new BigInteger(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable Boolean convertToBoolean(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Boolean convertToBoolean(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case BOOL:
@@ -229,13 +239,12 @@ public interface Converters {
       }
     }
 
-    public static byte@Nullable[] convertToByteArray(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static byte@Nullable[] convertToByteArray(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case BYTEA:
-          String str = convertToString(bytes);
+          String str = Util.stringFromBytes(bytes);
           if (!str.startsWith("\\x")) throw new IllegalArgumentException("Expected bytea type");
           return Util.hexToBytes(str.substring(2));
         default:
@@ -243,23 +252,20 @@ public interface Converters {
       }
     }
 
-    public static @Nullable ByteBuffer convertToByteBuffer(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
-      byte[] retBytes = convertToByteArray(dataTypeOid, formatText, bytes);
+    public static @Nullable ByteBuffer convertToByteBuffer(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
+      byte[] retBytes = convertToByteArray(dataTypeOid, textFormat, bytes);
       return retBytes == null ? null : ByteBuffer.wrap(retBytes);
     }
 
-    public static @Nullable Character convertToCharacter(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
+    public static @Nullable Character convertToCharacter(int dataTypeOid, boolean textFormat, byte[] bytes) {
       // If string isn't a single char, return null which reports error
-      String str = convertToString(dataTypeOid, formatText, bytes);
+      String str = convertToString(dataTypeOid, textFormat, bytes);
       return str == null || str.length() != 1 ? null : str.charAt(0);
     }
 
-    public static @Nullable Double convertToDouble(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Double convertToDouble(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
@@ -268,15 +274,14 @@ public interface Converters {
         case NUMERIC:
         case FLOAT4:
         case FLOAT8:
-          return Double.valueOf(convertToString(bytes));
+          return Double.valueOf(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable Float convertToFloat(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Float convertToFloat(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
@@ -284,34 +289,32 @@ public interface Converters {
         case INT8:
         case NUMERIC:
         case FLOAT4:
-          return Float.valueOf(convertToString(bytes));
+          return Float.valueOf(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable Integer convertToInteger(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Integer convertToInteger(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
         case INT4:
-          return Integer.valueOf(convertToString(bytes));
+          return Integer.valueOf(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable Interval convertToInterval(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Interval convertToInterval(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INTERVAL:
           // Format: [N year[s]] [N mon[s]] [N day[s]] [ISO 8601 local time]
           // Empty: ISO 8601 local time
-          String str = convertToString(bytes);
+          String str = Util.stringFromBytes(bytes);
           List<String> pieces = Util.splitByChar(str, ' ');
           boolean hasTime = pieces.size() % 2 == 1;
           int datePieceMax = hasTime ? pieces.size() - 1 : pieces.size();
@@ -350,100 +353,94 @@ public interface Converters {
       }
     }
 
-    public static @Nullable LocalDate convertToLocalDate(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable LocalDate convertToLocalDate(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case DATE:
-          return LocalDate.parse(convertToString(bytes), DateTimeFormatter.ISO_LOCAL_DATE);
+          return LocalDate.parse(Util.stringFromBytes(bytes), DateTimeFormatter.ISO_LOCAL_DATE);
         default:
           return null;
       }
     }
 
-    public static @Nullable LocalDateTime convertToLocalDateTime(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable LocalDateTime convertToLocalDateTime(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case TIMESTAMP:
-          return LocalDateTime.parse(convertToString(bytes), TIMESTAMP_FORMAT);
+          return LocalDateTime.parse(Util.stringFromBytes(bytes), TIMESTAMP_FORMAT);
         default:
           return null;
       }
     }
 
     public static @Nullable LocalTime convertToLocalTime(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+        int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case TIME:
-          return LocalTime.parse(convertToString(bytes), DateTimeFormatter.ISO_LOCAL_TIME);
+          return LocalTime.parse(Util.stringFromBytes(bytes), DateTimeFormatter.ISO_LOCAL_TIME);
         default:
           return null;
       }
     }
 
     public static @Nullable Long convertToLong(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+        int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
         case INT4:
         case INT8:
-          return Long.valueOf(convertToString(bytes));
+          return Long.valueOf(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable Money convertToMoney(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Money convertToMoney(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case MONEY:
-          return Money.fromString(convertToString(bytes));
+          return Money.fromString(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static @Nullable OffsetDateTime convertToOffsetDateTime(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable OffsetDateTime convertToOffsetDateTime(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case TIMESTAMPTZ:
-          return OffsetDateTime.parse(convertToString(bytes), TIMESTAMPTZ_FORMAT);
+          return OffsetDateTime.parse(Util.stringFromBytes(bytes), TIMESTAMPTZ_FORMAT);
         default:
           return null;
       }
     }
 
-    public static @Nullable OffsetTime convertToOffsetTime(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable OffsetTime convertToOffsetTime(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case TIMETZ:
-          return OffsetTime.parse(convertToString(bytes), TIMETZ_FORMAT);
+          return OffsetTime.parse(Util.stringFromBytes(bytes), TIMETZ_FORMAT);
         default:
           return null;
       }
     }
 
-    public static @Nullable Point convertToPoint(
-        int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Point convertToPoint(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case POINT:
           // Format: (x,y)
-          String str = convertToString(bytes);
+          String str = Util.stringFromBytes(bytes);
           int commaIndex = str.indexOf(',');
           if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
             throw new IllegalArgumentException("Unrecognized point format: " + str);
@@ -454,23 +451,19 @@ public interface Converters {
       }
     }
 
-    public static @Nullable Short convertToShort(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable Short convertToShort(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (dataTypeOid) {
         case UNSPECIFIED:
         case INT2:
-          return Short.valueOf(convertToString(bytes));
+          return Short.valueOf(Util.stringFromBytes(bytes));
         default:
           return null;
       }
     }
 
-    public static String convertToString(byte[] bytes) throws Exception {
-      return Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(bytes)).toString();
-    }
-
-    public static @Nullable String convertToString(int dataTypeOid, boolean formatText, byte[] bytes) throws Exception {
-      assertNotBinary(formatText);
+    public static @Nullable String convertToString(int dataTypeOid, boolean textFormat, byte[] bytes) {
+      assertNotBinary(textFormat);
       switch (DataType.normalizeOid(dataTypeOid)) {
         case UNSPECIFIED:
         case TEXT:
@@ -480,7 +473,7 @@ public interface Converters {
         case CHAR:
         case UUID:
         case JSON:
-          return convertToString(bytes);
+          return Util.stringFromBytes(bytes);
         default:
           return null;
       }

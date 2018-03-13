@@ -215,8 +215,8 @@ public class DataType {
   private DataType() { }
 
   public static class Money {
-    public static Money fromString(String string) throws ParseException { return fromString(string, null); }
-    public static Money fromString(String string, @Nullable Locale locale) throws ParseException {
+    public static Money fromString(String string) { return fromString(string, null); }
+    public static Money fromString(String string, @Nullable Locale locale) {
       // Format is like $100 or ($300.00)
       boolean negative = string.charAt(0) == '(' && string.charAt(string.length() - 1) == ')';
       if (negative) string = string.substring(1, string.length() - 1);
@@ -228,7 +228,9 @@ public class DataType {
       DecimalFormat fmt = (DecimalFormat) (locale == null ?
           NumberFormat.getInstance() : NumberFormat.getInstance(locale));
       fmt.setParseBigDecimal(true);
-      return new Money(symbol, (BigDecimal) fmt.parse(value));
+      try {
+        return new Money(symbol, (BigDecimal) fmt.parse(value));
+      } catch (ParseException e) { throw new RuntimeException(e); }
     }
 
     public final String symbol;

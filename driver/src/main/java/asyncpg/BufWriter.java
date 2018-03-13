@@ -1,8 +1,6 @@
 package asyncpg;
 
 import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharacterCodingException;
 
 public interface BufWriter {
   BufWriter writeLengthIntBegin();
@@ -11,6 +9,10 @@ public interface BufWriter {
   BufWriter writeBytes(byte[] b);
   BufWriter writeShort(short s);
   BufWriter writeInt(int i);
+  BufWriter writeStringEscapeSingleQuoteBegin();
+  BufWriter writeStringEscapeSingleQuoteEnd();
+  BufWriter writeStringEscapeDoubleQuoteBegin();
+  BufWriter writeStringEscapeDoubleQuoteEnd();
   BufWriter writeString(String str);
   BufWriter writeCString(String str);
 
@@ -20,6 +22,8 @@ public interface BufWriter {
     public final int bufferStep;
     public ByteBuffer buf;
     protected int bufLastLengthBegin = -1;
+    protected boolean escapeSingleQuote;
+    protected boolean escapeDoubleQuote;
 
     public Simple(boolean directBuffer, int bufferStep) {
       this.directBuffer = directBuffer;
@@ -76,11 +80,38 @@ public interface BufWriter {
     }
 
     @Override
+    public SELF writeStringEscapeSingleQuoteBegin() {
+      if (escapeSingleQuote) throw new IllegalStateException("Already escaping single quote");
+      escapeSingleQuote = true;
+      return (SELF) this;
+    }
+
+    @Override
+    public SELF writeStringEscapeSingleQuoteEnd() {
+      if (!escapeSingleQuote) throw new IllegalStateException("Not escaping single quote");
+      escapeSingleQuote = false;
+      return (SELF) this;
+    }
+
+    @Override
+    public SELF writeStringEscapeDoubleQuoteBegin() {
+      if (escapeDoubleQuote) throw new IllegalStateException("Already escaping double quote");
+      escapeDoubleQuote = true;
+      return (SELF) this;
+    }
+
+    @Override
+    public SELF writeStringEscapeDoubleQuoteEnd() {
+      if (!escapeDoubleQuote) throw new IllegalStateException("Not escaping double quote");
+      escapeDoubleQuote = false;
+      return (SELF) this;
+    }
+
+    @Override
     public SELF writeString(String str) {
-      ByteBuffer strBuf;
-      try {
-        strBuf = Util.threadLocalStringEncoder.get().encode(CharBuffer.wrap(str));
-      } catch (CharacterCodingException e) { throw new IllegalArgumentException(e); }
+      if (escapeSingleQuote) str = str.replace("'", "''");
+      if (escapeDoubleQuote) str = str.replace("\\", "\\\\").replace("\"", "\\\"");
+      ByteBuffer strBuf = Util.byteBufferFromString(str);
       writeEnsureCapacity(strBuf.limit()).put(strBuf);
       return (SELF) this;
     }

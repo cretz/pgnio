@@ -5,10 +5,12 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.time.*;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -29,13 +31,25 @@ public class QueryTest extends DbTestBase {
       - test alternative locales
       - internal types such as: "char", name
       - other types:
-        - arrays
         - geom types
+        - network types
+        - bit string
+        - text search
+        - uuid
+        - xml
+        - json
+        - arrays
+        - composite types
+        - ranges
+        - oids
+        - hstore
   */
 
   @Parameterized.Parameters(name = "{0}")
   public static List<TypeCheck> data() {
-    return Arrays.asList(
+    List<TypeCheck> typeChecks = new ArrayList<>();
+    // Regular types
+    typeChecks.addAll(Arrays.asList(
         TypeCheck.of("smallint", (short) 100, Short.MIN_VALUE, Short.MAX_VALUE, null),
         TypeCheck.of("integer", 101, Integer.MIN_VALUE, Integer.MAX_VALUE, null),
         TypeCheck.of("bigint", 102L, Long.MIN_VALUE, Long.MAX_VALUE, null),
@@ -49,13 +63,13 @@ public class QueryTest extends DbTestBase {
             /* Double.MAX_VALUE has too many digits */ 1.7976931348623e+308d,
             /* Double.MIN_NORMAL has too many digits */ 2.2250738585072e-308d,
             0.0d, -0.0d, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, Double.NaN, null),
-        TypeCheck.of("smallserial", (short) 107, Short.MIN_VALUE, Short.MAX_VALUE),
-        TypeCheck.of("serial", 108, Integer.MIN_VALUE, Integer.MAX_VALUE),
-        TypeCheck.of("bigserial", 109L, Long.MIN_VALUE, Long.MAX_VALUE),
+        TypeCheck.of("smallserial", (short) 107, Short.MIN_VALUE, Short.MAX_VALUE).arrayNotSupported(),
+        TypeCheck.of("serial", 108, Integer.MIN_VALUE, Integer.MAX_VALUE).arrayNotSupported(),
+        TypeCheck.of("bigserial", 109L, Long.MIN_VALUE, Long.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("money", new DataType.Money("$", new BigDecimal("1.10")), null),
-        TypeCheck.of("money", new BigDecimal("1.11"), null).overrideToSql(v -> "'$" + v.toString() + "'"),
-        TypeCheck.of("varchar(10)", "test1", "t\"es\"t2", null),
-        TypeCheck.of("char(10)", "test3", "t\"es\"t4", null).overrideEquals((exp, act) ->
+        TypeCheck.of("money", new BigDecimal("1.11"), null).multiDimensionalArrayNotSupported(),
+        TypeCheck.of("varchar(10)", "test1", "t\"es\"t'2", null),
+        TypeCheck.of("char(10)", "test3", "t\"es\"t'4", null).overrideEquals((exp, act) ->
             (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
         TypeCheck.of("char(1)", 'Q', null),
         TypeCheck.of("bytea", "test5".getBytes(), null).overrideEquals(Arrays::equals),
@@ -78,7 +92,24 @@ public class QueryTest extends DbTestBase {
             beforeUse(conn -> conn.simpleQueryExec("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')")).
             afterUse(conn -> conn.simpleQueryExec("DROP TYPE mood")),
         TypeCheck.of("point", new DataType.Point(30, 40), null)
-    );
+    ));
+    // Array versions
+    List<TypeCheck> arrayTypeChecks = new ArrayList<>();
+    for (TypeCheck typeCheck : typeChecks) {
+      if (typeCheck.arrayNotSupported) continue;
+      // Create array type check w/ another copy of the vals
+      TypeCheck arrayTypeCheck = typeCheck.asArray(typeCheck.interestingVals);
+      arrayTypeChecks.add(arrayTypeCheck);
+      // Also, create a multi-dimensional of length two w/ two copies of this if supported
+      if (!typeCheck.multiDimensionalArrayNotSupported) {
+        Object doubleArr = Array.newInstance(arrayTypeCheck.valClass, 2);
+        Array.set(doubleArr, 0, typeCheck.interestingVals);
+        Array.set(doubleArr, 1, typeCheck.interestingVals);
+        arrayTypeChecks.add(arrayTypeCheck.asArray((Object[]) doubleArr));
+      }
+    }
+    typeChecks.addAll(arrayTypeChecks);
+    return typeChecks;
   }
 
   @Parameterized.Parameter
@@ -115,7 +146,7 @@ public class QueryTest extends DbTestBase {
       cols[i] = "col_" + typeCheck.safeName + "_" + i + " " +
           typeCheck.dbType + (nullable ? " NULL" : " NOT NULL");
     }
-    return conn.simpleQueryExec("CREATE TABLE " + name + "(" + String.join(",", cols) + ")");
+    return conn.simpleQueryExec("CREATE TABLE " + name + " (" + String.join(",", cols) + ")");
   }
 
   CompletableFuture<QueryReadyConnection.AutoCommit> dropTable(QueryReadyConnection.AutoCommit conn, String name) {
@@ -198,7 +229,7 @@ public class QueryTest extends DbTestBase {
     static final BufWriter.Simple valBuf = new BufWriter.Simple(true, 1000);
     static synchronized byte[] valToBytes(Object val) {
       valBuf.buf.clear();
-      ParamWriter.DEFAULT.write(true, val, valBuf);
+      ParamWriter.DEFAULT.write(true, val, valBuf, true);
       valBuf.buf.flip();
       byte[] ret = new byte[valBuf.buf.limit()];
       valBuf.buf.get(ret);
@@ -213,10 +244,10 @@ public class QueryTest extends DbTestBase {
     Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> beforeUse;
     Function<QueryReadyConnection.AutoCommit, CompletableFuture<?>> afterUse;
     BiPredicate<T, T> overrideEquals;
-    Function<T, String> overrideToSql;
+    boolean arrayNotSupported;
+    boolean multiDimensionalArrayNotSupported;
 
-    @SafeVarargs
-    TypeCheck(String name, String dbType, Class<T> valClass, T... interestingVals) {
+    TypeCheck(String name, String dbType, Class<T> valClass, T[] interestingVals) {
       this.name = name;
       char[] safeNameChars = name.toCharArray();
       for (int i = 0; i < safeNameChars.length; i++)
@@ -237,15 +268,13 @@ public class QueryTest extends DbTestBase {
       return this;
     }
 
-    TypeCheck<T> overrideToSql(Function<T, String> overrideToSql) { this.overrideToSql = overrideToSql; return this; }
     TypeCheck<T> overrideEquals(BiPredicate<T, T> overrideEquals) { this.overrideEquals = overrideEquals; return this; }
+    TypeCheck<T> arrayNotSupported() { this.arrayNotSupported = true; return this; }
+    TypeCheck<T> multiDimensionalArrayNotSupported() { this.multiDimensionalArrayNotSupported = true; return this; }
 
-    String valToSql(T val) throws Exception {
+    String valToSql(T val) {
       if (val == null) return "NULL";
-      if (overrideToSql != null) return overrideToSql.apply(val);
-      String str = Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(valToBytes(val))).toString();
-      if (val instanceof Number && str.chars().allMatch(Character::isDigit)) return str;
-      return "'" + str.replace("'", "''") + "'";
+      return Util.stringFromBytes(valToBytes(val));
     }
 
     @Override
@@ -257,6 +286,28 @@ public class QueryTest extends DbTestBase {
       } else {
         Assert.assertEquals(msg, expectedVal, actualVal);
       }
+    }
+
+    TypeCheck<T[]> asArray(T[] anotherArray) {
+      T[][] arr = (T[][]) Array.newInstance(interestingVals.getClass(), anotherArray == null ? 1 : 2);
+      arr[0] = interestingVals;
+      if (anotherArray != null) arr[1] = anotherArray;
+      TypeCheck<T[]> ret = new TypeCheck(name + "[]", dbType + "[]", interestingVals.getClass(), arr) {
+        @Override
+        void assertValEquals(String msg, Object expectedVal, Object actualVal) {
+          if (overrideEquals != null) super.assertValEquals(msg, expectedVal, actualVal);
+          else Assert.assertArrayEquals(msg, (T[]) expectedVal, (T[]) actualVal);
+        }
+      };
+      if (overrideEquals != null) ret.overrideEquals = (arr1, arr2) -> {
+        if (arr1 == null) return arr2 == null;
+        if (arr2 == null || arr1.length != arr2.length) return false;
+        for (int i = 0; i < arr1.length; i++) if (!overrideEquals.test(arr1[i], arr2[i])) return false;
+        return true;
+      };
+      ret.beforeUse = beforeUse;
+      ret.afterUse = afterUse;
+      return ret;
     }
   }
 }
