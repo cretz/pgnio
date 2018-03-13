@@ -264,7 +264,11 @@ public abstract class Connection implements AutoCloseable {
     }
 
     protected CompletableFuture<Void> cancelOther(int processId, int secretKey) {
-      throw new UnsupportedOperationException();
+      // Send the cancel request and just close the connection
+      ctx.buf.clear();
+      ctx.writeInt(16).writeInt(80877102).writeInt(processId).writeInt(secretKey);
+      ctx.buf.flip();
+      return writeFrontendMessage().whenComplete((__, ___) -> ctx.io.close());
     }
   }
 
