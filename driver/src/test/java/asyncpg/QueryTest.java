@@ -8,6 +8,7 @@ import org.junit.runners.Parameterized;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.time.*;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -58,8 +59,21 @@ public class QueryTest extends DbTestBase {
           (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
         TypeCheck.of("char(1)", 'Q', null),
         TypeCheck.of("bytea", "test5".getBytes(), null).overrideEquals(Arrays::equals),
-        TypeCheck.of("bytea", ByteBuffer.wrap("test6".getBytes()), null)
-        // TODO: migrate everything else over from RowReaderTest
+        TypeCheck.of("bytea", ByteBuffer.wrap("test6".getBytes()), null),
+        TypeCheck.of("date", LocalDate.of(2018, 1, 1), null),
+        TypeCheck.of("time", LocalTime.of(0, 1, 1), null),
+        TypeCheck.of("time(3)", LocalTime.of(0, 1, 2, 345000000), null),
+        TypeCheck.of("time with time zone", OffsetTime.of(0, 1, 3, 0, ZoneOffset.ofHours(-5)), null),
+        TypeCheck.of("time(1) with time zone", OffsetTime.of(0, 1, 4, 500000000, ZoneOffset.ofHours(-6)), null),
+        TypeCheck.of("timestamp", LocalDateTime.of(2018, 1, 2, 0, 2, 1), null),
+        TypeCheck.of("timestamp(3)", LocalDateTime.of(2018, 1, 3, 0, 2, 2, 123000000), null),
+        TypeCheck.of("timestamp with time zone", OffsetDateTime.of(2018, 1, 4, 0, 2, 3, 0,
+            ZoneOffset.ofHoursMinutes(-5, -30)).atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime(), null),
+        TypeCheck.of("timestamp(2) with time zone", OffsetDateTime.of(2018, 1, 5, 0, 2, 4, 230000000,
+            ZoneOffset.ofHoursMinutes(-6, -30)).atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime(), null),
+        TypeCheck.of("interval", new DataType.Interval(Period.of(1, 2, 3), Duration.ofSeconds(4000, 500000)),
+            new DataType.Interval(Period.of(-1, -2, -3), Duration.ofSeconds(-4000, -500000)), null),
+        TypeCheck.of("boolean", true, false, null)
     );
   }
 
@@ -167,7 +181,7 @@ public class QueryTest extends DbTestBase {
       // Trim the trailing 0 if there...
       if (buf.hasRemaining() && buf.get(buf.limit() - 1) == 0) buf.limit(buf.limit() - 1);
       String str = Util.threadLocalStringDecoder.get().decode(buf).toString();
-      if (val instanceof Number) return str;
+      if (val instanceof Number && str.chars().allMatch(Character::isDigit)) return str;
       return "'" + str.replace("'", "''") + "'";
     }
 

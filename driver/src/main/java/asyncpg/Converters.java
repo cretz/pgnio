@@ -93,12 +93,17 @@ public interface Converters {
       from.put(Boolean.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(ByteBuffer.class.getName(), typedFrom(BuiltIn::convertFromByteBuffer));
       from.put(Character.class.getName(), BuiltIn::convertFromAnyToString);
-      from.put(Double.class.getName(), typedFrom(BuiltIn::convertFromDouble));
-      from.put(Float.class.getName(), typedFrom(BuiltIn::convertFromFloat));
+      from.put(Double.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(Float.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Integer.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Interval.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(Long.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(LocalDate.class.getName(), typedFrom(BuiltIn::convertFromLocalDate));
+      from.put(LocalDateTime.class.getName(), typedFrom(BuiltIn::convertFromLocalDateTime));
+      from.put(LocalTime.class.getName(), typedFrom(BuiltIn::convertFromLocalTime));
       from.put(DataType.Money.class.getName(), BuiltIn::convertFromAnyToString);
+      from.put(OffsetDateTime.class.getName(), typedFrom(BuiltIn::convertFromOffsetDateTime));
+      from.put(OffsetTime.class.getName(), typedFrom(BuiltIn::convertFromOffsetTime));
       from.put(Short.class.getName(), BuiltIn::convertFromAnyToString);
       from.put(String.class.getName(), BuiltIn::convertFromAnyToString);
       FROM_CONVERTERS = Collections.unmodifiableMap(from);
@@ -149,16 +154,29 @@ public interface Converters {
       convertFromByteArray(formatText, bytes, buf);
     }
 
-    public static void convertFromDouble(boolean formatText, Double obj, BufWriter buf) {
+    public static void convertFromLocalDate(boolean formatText, LocalDate obj, BufWriter buf) {
       assertNotBinary(formatText);
-      if (obj.isInfinite() || obj.isNaN() || obj.equals(-0.0d)) buf.writeString("'" + obj + "'");
-      else buf.writeString(obj.toString());
+      buf.writeString(obj.format(DateTimeFormatter.ISO_LOCAL_DATE));
     }
 
-    public static void convertFromFloat(boolean formatText, Float obj, BufWriter buf) {
+    public static void convertFromLocalDateTime(boolean formatText, LocalDateTime obj, BufWriter buf) {
       assertNotBinary(formatText);
-      if (obj.isInfinite() || obj.isNaN() || obj.equals(-0.0f)) buf.writeString("'" + obj + "'");
-      else buf.writeString(obj.toString());
+      buf.writeString(obj.format(TIMESTAMP_FORMAT));
+    }
+
+    public static void convertFromLocalTime(boolean formatText, LocalTime obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      buf.writeString(obj.format(DateTimeFormatter.ISO_LOCAL_TIME));
+    }
+
+    public static void convertFromOffsetDateTime(boolean formatText, OffsetDateTime obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      buf.writeString(obj.format(TIMESTAMPTZ_FORMAT));
+    }
+
+    public static void convertFromOffsetTime(boolean formatText, OffsetTime obj, BufWriter buf) {
+      assertNotBinary(formatText);
+      buf.writeString(obj.format(TIMETZ_FORMAT));
     }
 
     public static @Nullable BigDecimal convertToBigDecimal(
