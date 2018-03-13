@@ -187,11 +187,11 @@ public abstract class Connection implements AutoCloseable {
       log.log(Level.FINE, "{0} Authenticating", ctx);
       // Send startup message
       ctx.buf.clear();
-      ctx.writeLengthIntBegin().writeInt(ctx.config.protocolVersion).writeString("user").
-          writeString(ctx.config.username);
-      if (ctx.config.database != null) ctx.writeString("database").writeString(ctx.config.database);
+      ctx.writeLengthIntBegin().writeInt(ctx.config.protocolVersion).writeCString("user").
+          writeCString(ctx.config.username);
+      if (ctx.config.database != null) ctx.writeCString("database").writeCString(ctx.config.database);
       if (ctx.config.additionalStartupParams != null)
-        ctx.config.additionalStartupParams.forEach((k, v) -> ctx.writeString(k).writeString(v));
+        ctx.config.additionalStartupParams.forEach((k, v) -> ctx.writeCString(k).writeCString(v));
       ctx.writeByte((byte) 0).writeLengthIntEnd();
       ctx.buf.flip();
       return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
@@ -222,7 +222,7 @@ public abstract class Connection implements AutoCloseable {
     protected CompletableFuture<QueryReadyConnection.AutoCommit> sendClearTextPassword() {
       if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
       ctx.buf.clear();
-      ctx.writeByte((byte) 'p').writeLengthIntBegin().writeString(ctx.config.password).writeLengthIntEnd();
+      ctx.writeByte((byte) 'p').writeLengthIntBegin().writeCString(ctx.config.password).writeLengthIntEnd();
       ctx.buf.flip();
       return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
     }

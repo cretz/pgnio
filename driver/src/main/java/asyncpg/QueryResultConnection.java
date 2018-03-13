@@ -3,12 +3,14 @@ package asyncpg;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.*;
 import java.util.logging.Level;
 import java.util.stream.Collector;
+import java.util.stream.Collectors;
 
 public class QueryResultConnection<T extends Connection.Started> extends Connection.Started {
 
@@ -50,6 +52,9 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         byte[] copyBytes = new byte[ctx.buf.remaining()];
         ctx.buf.get(copyBytes);
         return new QueryMessage.CopyData(queryCounter, copyBytes);
+      // NoData
+      case 'n':
+        return new QueryMessage.NoData(queryCounter);
       // PortalSuspended
       case 's':
         return new QueryMessage.PortalSuspended(queryCounter);
@@ -115,7 +120,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   }
 
   // Message is null if already done
-  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  @SuppressWarnings("return.type.incompatible")
   public CompletableFuture<@Nullable QueryMessage> next() {
     if (isDone()) return CompletableFuture.completedFuture(null);
     return readNonGeneralBackendMessage().thenApply(__ -> handleReadMessage()).whenComplete((msg, ex) -> {
@@ -129,7 +134,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   }
 
   // Will return null on "done" or wait...
-  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  @SuppressWarnings("return.type.incompatible")
   public CompletableFuture<@Nullable QueryMessage> next(Predicate<QueryMessage> pred) {
     return next().thenCompose(msg ->
         msg == null || pred.test(msg) ? CompletableFuture.completedFuture(msg) : next(pred));
@@ -141,6 +146,10 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return next(messageType::isInstance).thenApply(msg -> (U) msg);
   }
 
+  public CompletableFuture<List<QueryMessage.Row>> collectRows() {
+    return collectRows(Collectors.toList());
+  }
+
   @SuppressWarnings("unchecked")
   public <R, A> CompletableFuture<R> collectRows(Collector<? super QueryMessage.Row, A, R> collector) {
     return collectRows(collector.supplier(), collector.accumulator()).thenApply(c -> {
@@ -150,7 +159,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
-  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  @SuppressWarnings("return.type.incompatible")
   public <R> CompletableFuture<R> collectRows(Supplier<R> supplier,
       BiConsumer<R, ? super QueryMessage.Row> accumulator) {
     R ret = supplier.get();
@@ -180,6 +189,10 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
+  public CompletableFuture<@Nullable Long> collectRowCount() {
+    return next(QueryMessage.Complete.class).thenApply(complete -> complete == null ? null : complete.getRowCount());
+  }
+
   protected CompletableFuture<Void> sendCopyData(byte[] data) {
     ctx.buf.clear();
     ctx.writeByte((byte) 'd').writeLengthIntBegin().writeBytes(data).writeLengthIntEnd();
@@ -204,7 +217,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
 
   protected CompletableFuture<Void> sendCopyFail(String message) {
     ctx.buf.clear();
-    ctx.writeByte((byte) 'f').writeLengthIntBegin().writeString(message).writeLengthIntEnd();
+    ctx.writeByte((byte) 'f').writeLengthIntBegin().writeCString(message).writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage();
   }
@@ -218,5 +231,14 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       prevConn.invalid = false;
       return prevConn;
     });
+  }
+
+  public CompletableFuture<List<QueryMessage.Row>> collectRowsAndDone() {
+    return collectRows().thenCompose(rows -> done().thenApply(__ -> rows));
+  }
+
+  @SuppressWarnings("return.type.incompatible")
+  public CompletableFuture<@Nullable Long> collectRowCountAndDone() {
+    return collectRowCount().thenCompose(rowCount -> done().thenApply(__ -> rowCount));
   }
 }

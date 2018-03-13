@@ -105,6 +105,10 @@ public abstract class QueryMessage {
     public CloseComplete(int queryIndex) { super(queryIndex); }
   }
 
+  public static class NoData extends QueryMessage {
+    public NoData(int queryIndex) { super(queryIndex); }
+  }
+
   public static class Row extends QueryMessage {
     public final @Nullable RowMeta meta;
     public final byte[]@Nullable [] raw;

@@ -88,16 +88,18 @@ public class QueryTest extends DbTestBase {
         createTable(conn, tableName).
             thenCompose(__ -> simpleInsertThenSelect(conn, tableName)).
             thenCompose(r -> dropTable(conn, tableName).thenApply(__ -> r)));
-    // Go over every expected val
-    for (int i = 0; i < typeCheck.interestingVals.length; i++) {
-      Object expectedVal = typeCheck.interestingVals[i];
-      // First by index then by name
-      typeCheck.assertValEquals("Failed col " + i + " has expected val " + expectedVal + " for " + typeCheck,
-          expectedVal, RowReader.DEFAULT.get(row, i, typeCheck.valClass));
-      String colName = "col_" + typeCheck.safeName + "_" + i;
-      typeCheck.assertValEquals("Failed col " + colName + " has expected val " + expectedVal + " for " + typeCheck,
-          expectedVal, RowReader.DEFAULT.get(row, colName, typeCheck.valClass));
-    }
+    assertQueryRow(row);
+  }
+
+  @Test
+  public void testPreparedQuery() {
+    String tableName = "test_prepared_query_" + typeCheck.safeName;
+    // Create the table, insert, select, drop table
+    QueryMessage.Row row = withConnectionSync(conn ->
+        createTable(conn, tableName).
+            thenCompose(__ -> preparedInsertThenSelect(conn, tableName)).
+            thenCompose(r -> dropTable(conn, tableName).thenApply(__ -> r)));
+    assertQueryRow(row);
   }
 
   CompletableFuture<?> createTable(QueryReadyConnection.AutoCommit conn, String name) {
@@ -118,13 +120,47 @@ public class QueryTest extends DbTestBase {
         vals[i] = typeCheck.valToSql(typeCheck.interestingVals[i]);
       } catch (Exception e) { throw new RuntimeException(e); }
     }
-    return conn.simpleQueryExec("INSERT INTO " + tableName + " VALUES (" + String.join(",", vals) + ")").
-        thenCompose(__ -> conn.simpleQueryRows("SELECT * FROM " + tableName)).
+    return conn.simpleQueryRowCount("INSERT INTO " + tableName + " VALUES (" + String.join(",", vals) + ")").
+        thenCompose(rowCount -> {
+          Assert.assertEquals(1L, rowCount.longValue());
+          return conn.simpleQueryRows("SELECT * FROM " + tableName);
+        }).
+        thenApply(rows -> rows.isEmpty() ? null : rows.get(0));
+  }
+
+  CompletableFuture<QueryMessage.Row> preparedInsertThenSelect(
+      QueryReadyConnection.AutoCommit conn, String tableName) {
+    String[] vals = new String[typeCheck.interestingVals.length];
+    Object[] params = new Object[vals.length];
+    for (int i = 0; i < vals.length; i++) {
+      try {
+        vals[i] = "$" + (i + 1);
+        params[i] = typeCheck.interestingVals[i];
+      } catch (Exception e) { throw new RuntimeException(e); }
+    }
+    return conn.preparedQueryRowCount("INSERT INTO " + tableName + " VALUES (" + String.join(",", vals) + ")", params).
+        thenCompose(rowCount -> {
+          Assert.assertEquals(1L, rowCount.longValue());
+          return conn.simpleQueryRows("SELECT * FROM " + tableName);
+        }).
         thenApply(rows -> rows.isEmpty() ? null : rows.get(0));
   }
 
   CompletableFuture<?> dropTable(QueryReadyConnection.AutoCommit conn, String name) {
     return conn.simpleQueryExec("DROP TABLE " + name);
+  }
+
+  void assertQueryRow(QueryMessage.Row row) {
+    // Go over every expected val
+    for (int i = 0; i < typeCheck.interestingVals.length; i++) {
+      Object expectedVal = typeCheck.interestingVals[i];
+      // First by index then by name
+      typeCheck.assertValEquals("Failed col " + i + " has expected val " + expectedVal + " for " + typeCheck,
+          expectedVal, RowReader.DEFAULT.get(row, i, typeCheck.valClass));
+      String colName = "col_" + typeCheck.safeName + "_" + i;
+      typeCheck.assertValEquals("Failed col " + colName + " has expected val " + expectedVal + " for " + typeCheck,
+          expectedVal, RowReader.DEFAULT.get(row, colName, typeCheck.valClass));
+    }
   }
 
   static class TypeCheck<T> {
@@ -177,10 +213,7 @@ public class QueryTest extends DbTestBase {
     String valToSql(T val) throws Exception {
       if (val == null) return "NULL";
       if (overrideToSql != null) return overrideToSql.apply(val);
-      ByteBuffer buf = ByteBuffer.wrap(valToBytes(val));
-      // Trim the trailing 0 if there...
-      if (buf.hasRemaining() && buf.get(buf.limit() - 1) == 0) buf.limit(buf.limit() - 1);
-      String str = Util.threadLocalStringDecoder.get().decode(buf).toString();
+      String str = Util.threadLocalStringDecoder.get().decode(ByteBuffer.wrap(valToBytes(val))).toString();
       if (val instanceof Number && str.chars().allMatch(Character::isDigit)) return str;
       return "'" + str.replace("'", "''") + "'";
     }

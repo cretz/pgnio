@@ -12,6 +12,7 @@ public interface BufWriter {
   BufWriter writeShort(short s);
   BufWriter writeInt(int i);
   BufWriter writeString(String str);
+  BufWriter writeCString(String str);
 
   @SuppressWarnings("unchecked")
   class Simple<SELF extends Simple<SELF>> implements BufWriter {
@@ -80,8 +81,13 @@ public interface BufWriter {
       try {
         strBuf = Util.threadLocalStringEncoder.get().encode(CharBuffer.wrap(str));
       } catch (CharacterCodingException e) { throw new IllegalArgumentException(e); }
-      writeEnsureCapacity(strBuf.limit() + 1).put(strBuf).put((byte) 0);
+      writeEnsureCapacity(strBuf.limit()).put(strBuf);
       return (SELF) this;
+    }
+
+    @Override
+    public SELF writeCString(String str) {
+      return writeString(str).writeByte((byte) 0);
     }
   }
 }

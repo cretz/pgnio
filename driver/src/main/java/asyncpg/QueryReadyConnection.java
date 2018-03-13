@@ -5,7 +5,6 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 
 public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SELF>> extends Connection.Started {
   protected QueryReadyConnection(Context ctx) { super(ctx); }
@@ -14,7 +13,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
 
   protected CompletableFuture<Void> sendQuery(String query) {
     ctx.buf.clear();
-    ctx.writeByte((byte) 'Q').writeLengthIntBegin().writeString(query).writeLengthIntEnd();
+    ctx.writeByte((byte) 'Q').writeLengthIntBegin().writeCString(query).writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage();
   }
@@ -28,16 +27,12 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
   }
 
   public CompletableFuture<List<QueryMessage.Row>> simpleQueryRows(String query) {
-    return simpleQuery(query).thenCompose(res ->
-        res.collectRows(Collectors.toList()).thenCompose(rows ->
-            res.done().thenApply(__ -> rows)));
+    return simpleQuery(query).thenCompose(QueryResultConnection::collectRowsAndDone);
   }
 
-  @SuppressWarnings("return.type.incompatible") // TODO: https://github.com/typetools/checker-framework/issues/1882
+  @SuppressWarnings({"return.type.incompatible", "methodref.return.invalid"})
   public CompletableFuture<@Nullable Long> simpleQueryRowCount(String query) {
-    return simpleQuery(query).thenCompose(res ->
-        res.next(QueryMessage.Complete.class).thenCompose(complete ->
-            res.done().thenApply(__ -> complete == null ? null : complete.getRowCount())));
+    return simpleQuery(query).thenCompose(QueryResultConnection::collectRowCountAndDone);
   }
 
   public CompletableFuture<SELF> simpleQueryExec(String query) {
@@ -46,7 +41,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
 
   protected CompletableFuture<Void> sendParse(String statementName, String query, int... parameterDataTypes) {
     ctx.buf.clear();
-    ctx.writeByte((byte) 'P').writeLengthIntBegin().writeString(statementName).writeString(query).
+    ctx.writeByte((byte) 'P').writeLengthIntBegin().writeCString(statementName).writeCString(query).
         writeShort((short) parameterDataTypes.length);
     for (int parameterDataType : parameterDataTypes) ctx.writeInt(parameterDataType);
     ctx.writeLengthIntEnd();
@@ -64,8 +59,32 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
   public CompletableFuture<QueryBuildConnection.Prepared<SELF>> prepareReusable(String statementName,
       String query, int... parameterDataTypes) {
     assertValid();
+    log.log(Level.FINE, "Preparing query: {0}", query);
     return sendParse(statementName, query, parameterDataTypes).
         thenApply(__ -> new QueryBuildConnection.Prepared<>(ctx, (SELF) this, statementName));
+  }
+
+  public CompletableFuture<QueryResultConnection<SELF>> preparedQuery(String query, Object... params) {
+    return prepare(query).
+        thenCompose(QueryBuildConnection.Prepared::describeStatement).
+        thenCompose(prepared -> prepared.bind(params)).
+        thenCompose(QueryBuildConnection.Bound::execute).
+        thenCompose(QueryBuildConnection::done);
+  }
+
+  // TODO: preparedReusableQuery, reusePrepare, reusePrepared, reusePreparedQuery
+
+  public CompletableFuture<List<QueryMessage.Row>> preparedQueryRows(String query, Object... params) {
+    return preparedQuery(query, params).thenCompose(QueryResultConnection::collectRowsAndDone);
+  }
+
+  @SuppressWarnings({"return.type.incompatible", "methodref.return.invalid"})
+  public CompletableFuture<@Nullable Long> preparedQueryRowCount(String query, Object... params) {
+    return preparedQuery(query, params).thenCompose(QueryResultConnection::collectRowCountAndDone);
+  }
+
+  public CompletableFuture<SELF> preparedQueryExec(String query, Object... params) {
+    return preparedQuery(query, params).thenCompose(QueryResultConnection::done);
   }
 
   public enum TransactionStatus { IDLE, IN_TRANSACTION, FAILED_TRANSACTION }
@@ -92,6 +111,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
       throw new UnsupportedOperationException();
     }
 
+    // TODO: reuseBound
 //    public CompletableFuture<BoundConnection.Reusable> reuseBound(NamedBound bound) {
 //      assertValid();
 //      throw new UnsupportedOperationException();
