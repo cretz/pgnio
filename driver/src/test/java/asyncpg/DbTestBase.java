@@ -22,7 +22,7 @@ public abstract class DbTestBase extends TestBase {
 
   protected <T> T withConnectionSync(Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
     try {
-      return Connection.authed(db.conf().dbConf).thenCompose(conn -> fn.apply(conn).thenCompose(conn::terminate)).get();
+      return Connection.authed(db.conf().dbConf).thenCompose(conn -> conn.terminated(fn.apply(conn))).get();
     } catch (InterruptedException | ExecutionException e) { throw new RuntimeException(e); }
   }
 }

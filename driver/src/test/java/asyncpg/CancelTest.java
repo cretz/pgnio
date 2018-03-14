@@ -13,7 +13,7 @@ public class CancelTest extends DbTestBase {
     // Create a query that lasts for 10 seconds, then open another connection and kill it
     CompletableFuture<QueryReadyConnection.AutoCommit> origConn = Connection.authed(db.conf().dbConf);
     CompletableFuture<List<QueryMessage.Row>> rowsFut = origConn.thenCompose(conn ->
-      conn.simpleQueryRows("SELECT 'test', pg_sleep(10)").thenCompose(conn::terminate));
+      conn.terminated(conn.simpleQueryRows("SELECT 'test', pg_sleep(10)")));
     origConn.thenCompose(origConnRef ->
         Connection.init(db.conf().dbConf).thenCompose(conn ->
             conn.cancelOther(origConnRef.getProcessId(), origConnRef.getSecretKey()))).get();

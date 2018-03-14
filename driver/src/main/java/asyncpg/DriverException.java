@@ -6,6 +6,10 @@ public abstract class DriverException extends RuntimeException {
   public DriverException(String message, Throwable cause) { super(message, cause); }
   public DriverException(Throwable cause) { super(cause); }
 
+  public static class NonGeneralMessageOnTick extends DriverException {
+    public NonGeneralMessageOnTick(char typ) { super("Expected general message, but got message of type: " + typ); }
+  }
+
   public static class ColumnNotPresent extends DriverException {
     public ColumnNotPresent(String message) { super(message); }
   }
@@ -42,9 +46,9 @@ public abstract class DriverException extends RuntimeException {
   }
 
   public static class FromServer extends DriverException {
-    public final Notice notice;
+    public final Subscribable.Notice notice;
 
-    public FromServer(Notice notice) {
+    public FromServer(Subscribable.Notice notice) {
       super(notice.toString());
       this.notice = notice;
     }

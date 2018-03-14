@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -40,12 +41,32 @@ public abstract class Connection implements AutoCloseable {
 
   public CompletableFuture<Void> terminate() { return sendTerminate().whenComplete((__, ___) -> ctx.io.close()); }
 
-  // Good for use on thenCompose
-  public <T> CompletableFuture<T> terminate(T ret) {
-    return terminate().thenApply(__ -> ret);
+  // Good for use on handle
+  protected <@Nullable T> CompletableFuture<T> terminate(T ret, @Nullable Throwable ex) {
+    return terminate().handle((__, termEx) -> {
+      if (ex != null && termEx != null) log.log(Level.WARNING, "Failed terminating", termEx);
+      Throwable rethrow = ex == null ? termEx : ex;
+      if (rethrow != null) {
+        if (ex instanceof RuntimeException) throw (RuntimeException) ex;
+        throw new RuntimeException(ex);
+      }
+      return ret;
+    });
   }
 
-  public Subscribable<Notice> notices() { return ctx.noticeSubscribable; }
+  // Good for use on handle
+  public <T> CompletableFuture<T> terminated(@Nullable CompletableFuture<T> ret, @Nullable Throwable ex) {
+    if (ret != null) return terminated(ret);
+    return terminate(ret, ex).thenCompose(Function.identity());
+  }
+
+  public <T> CompletableFuture<T> terminated(CompletableFuture<T> fut) {
+    return fut.handle(this::terminate).thenCompose(Function.identity());
+  }
+
+  public Subscribable<Subscribable.Notice> notices() { return ctx.noticeSubscribable; }
+  public Subscribable<Subscribable.Notification> notifications() { return ctx.notificationSubscribable; }
+  public Subscribable<Subscribable.ParameterStatus> parameterStatuses() { return ctx.parameterStatusSubscribable; }
 
   public Map<String, String> getRuntimeParameters() { return ctx.runtimeParameters; }
 
@@ -82,8 +103,13 @@ public abstract class Connection implements AutoCloseable {
   protected @Nullable CompletableFuture<Void> handleGeneralResponse() {
     char typ = (char) ctx.buf.get(0);
     switch (typ) {
-      // Throw on error
+      // Notification Response
+      case 'A':
+        ctx.buf.position(5);
+        return notifications().publish(new Subscribable.Notification(ctx.buf.getInt(), ctx.bufReadString(), ctx.bufReadString()));
+      // ErrorMessage
       case 'E':
+      // NoticeResponse
       case 'N':
         // Throw error or handle notice after skipping the length
         ctx.buf.position(5);
@@ -93,15 +119,18 @@ public abstract class Connection implements AutoCloseable {
           if (b == 0) break;
           fields.put(b, ctx.bufReadString());
         }
-        Notice notice = new Notice(fields);
+        Subscribable.Notice notice = new Subscribable.Notice(fields);
+        // Throw on error, send to subscriber on normal notice
         if (typ == 'E') throw new DriverException.FromServer(notice);
         return notices().publish(notice);
+      // ParameterStatus
       case 'S':
         // Handle status after skipping length
         ctx.buf.position(5);
-        ctx.runtimeParameters.put(ctx.bufReadString(), ctx.bufReadString());
-        return CompletableFuture.completedFuture(null);
-      // TODO: Notification
+        Subscribable.ParameterStatus status =
+            new Subscribable.ParameterStatus(ctx.bufReadString(), ctx.bufReadString());
+        ctx.runtimeParameters.put(status.parameter, status.value);
+        return parameterStatuses().publish(status);
       default: return null;
     }
   }
@@ -134,8 +163,9 @@ public abstract class Connection implements AutoCloseable {
   public static class Context extends BufWriter.Simple<Context> {
     public final Config config;
     public final ConnectionIo io;
-    protected final Subscribable<Notice> noticeSubscribable = new Subscribable<>();
-    protected final Subscribable<Notification> notificationSubscribable = new Subscribable<>();
+    protected final Subscribable<Subscribable.Notice> noticeSubscribable = new Subscribable<>();
+    protected final Subscribable<Subscribable.Notification> notificationSubscribable = new Subscribable<>();
+    protected final Subscribable<Subscribable.ParameterStatus> parameterStatusSubscribable = new Subscribable<>();
     protected @Nullable Integer processId;
     protected @Nullable Integer secretKey;
     protected final Map<String, String> runtimeParameters = new HashMap<>();
@@ -278,10 +308,18 @@ public abstract class Connection implements AutoCloseable {
 
     protected Started(Context ctx) { super(ctx); }
 
-    public Subscribable<Notification> notifications() { return ctx.notificationSubscribable; }
-
     public @Nullable Integer getProcessId() { return ctx.processId; }
     public @Nullable Integer getSecretKey() { return ctx.secretKey; }
+
+    // Tick for general messages, errors when timeout reached (java.nio.channels.InterruptedByTimeoutException) or
+    // if a non-general message is sent
+    public CompletableFuture<Void> unsolicitedMessageTick(long timeout, TimeUnit timeoutUnit) {
+      return readBackendMessage(timeout, timeoutUnit).thenCompose(__ -> {
+        CompletableFuture<Void> generalHandled = handleGeneralResponse();
+        if (generalHandled != null) return generalHandled;
+        throw new DriverException.NonGeneralMessageOnTick((char) ctx.buf.get(0));
+      });
+    }
 
     protected void assertValid() {
       if (invalid) throw new IllegalStateException("Not ready for queries");
