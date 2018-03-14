@@ -7,7 +7,9 @@ import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.text.ParseException;
 import java.time.Duration;
+import java.time.LocalTime;
 import java.time.Period;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class DataType {
@@ -215,8 +217,8 @@ public class DataType {
   private DataType() { }
 
   public static class Money {
-    public static Money fromString(String string) { return fromString(string, null); }
-    public static Money fromString(String string, @Nullable Locale locale) {
+    public static Money valueOf(String string) { return valueOf(string, null); }
+    public static Money valueOf(String string, @Nullable Locale locale) {
       // Format is like $100 or ($300.00)
       boolean negative = string.charAt(0) == '(' && string.charAt(string.length() - 1) == ')';
       if (negative) string = string.substring(1, string.length() - 1);
@@ -257,6 +259,44 @@ public class DataType {
   }
 
   public static class Interval {
+    // Format: [N year[s]] [N mon[s]] [N day[s]] [ISO 8601 local time]
+    // Empty: ISO 8601 local time
+    public static Interval valueOf(String str) {
+      List<String> pieces = Util.splitByChar(str, ' ');
+      boolean hasTime = pieces.size() % 2 == 1;
+      int datePieceMax = hasTime ? pieces.size() - 1 : pieces.size();
+      int years = 0, mons = 0, days = 0;
+      for (int i = 0; i < datePieceMax; i += 2) {
+        int val = Integer.parseInt(pieces.get(i));
+        switch (pieces.get(i + 1)) {
+          case "year":
+          case "years":
+            years = val;
+            break;
+          case "mon":
+          case "mons":
+            mons = val;
+            break;
+          case "day":
+          case "days":
+            days = val;
+            break;
+          default:
+            throw new IllegalArgumentException("Unrecognized piece '" + pieces.get(i + 1) + "' in '" + str + "'");
+        }
+      }
+      Duration timeDuration = Duration.ZERO;
+      if (hasTime) {
+        String timePiece = pieces.get(pieces.size() - 1);
+        boolean negative = timePiece.charAt(0) == '-';
+        if (negative) timePiece = timePiece.substring(1);
+        LocalTime parsed = LocalTime.parse(timePiece, DateTimeFormatter.ISO_LOCAL_TIME);
+        timeDuration = Duration.ofSeconds(negative ? -parsed.toSecondOfDay() : parsed.toSecondOfDay(),
+            negative ? -parsed.getNano() : parsed.getNano());
+      }
+      return new Interval(Period.of(years, mons, days), timeDuration);
+    }
+
     public final Period datePeriod;
     public final Duration timeDuration;
 
@@ -311,6 +351,15 @@ public class DataType {
   }
 
   public static class Point {
+    // Format: (x,y)
+    public static Point valueOf(String str) {
+      int commaIndex = str.indexOf(',');
+      if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
+        throw new IllegalArgumentException("Unrecognized point format: " + str);
+      return new Point(Integer.parseInt(str.substring(1, commaIndex)),
+          Integer.parseInt(str.substring(commaIndex + 1, str.length() - 1)));
+    }
+
     public final int x;
     public final int y;
 
@@ -335,6 +384,18 @@ public class DataType {
   }
 
   public static class Line {
+    // Format: {A,B,C}
+    public static Line valueOf(String str) {
+      int commaIndex = str.indexOf(',');
+      int secondCommaIndex = str.indexOf(',', commaIndex + 1);
+      if (str.isEmpty() || str.charAt(0) != '{' || str.charAt(str.length() - 1) != '}' ||
+          commaIndex == -1 || secondCommaIndex == -1)
+        throw new IllegalArgumentException("Unrecognized line format: " + str);
+      return new Line(Integer.parseInt(str.substring(1, commaIndex)),
+          Integer.parseInt(str.substring(commaIndex + 1, secondCommaIndex)),
+          Integer.parseInt(str.substring(secondCommaIndex + 1, str.length() - 1)));
+    }
+
     public final int a;
     public final int b;
     public final int c;
@@ -361,6 +422,15 @@ public class DataType {
   }
 
   public static class LineSegment {
+    // Format: ((x1,y1),(x2,y2))
+    public static LineSegment valueOf(String str) {
+      int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
+      if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
+        throw new IllegalArgumentException("Unrecognized segment format: " + str);
+      return new LineSegment(Point.valueOf(str.substring(1, commaIndex)),
+          Point.valueOf(str.substring(commaIndex + 1, str.length() - 2)));
+    }
+
     public final Point point1;
     public final Point point2;
 
@@ -385,6 +455,15 @@ public class DataType {
   }
 
   public static class Box {
+    // Format: ((x1,y1),(x2,y2))
+    public static Box valueOf(String str) {
+      int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
+      if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
+        throw new IllegalArgumentException("Unrecognized box format: " + str);
+      return new Box(Point.valueOf(str.substring(1, commaIndex)),
+          Point.valueOf(str.substring(commaIndex + 1, str.length() - 2)));
+    }
+
     public final Point point1;
     public final Point point2;
 
@@ -409,6 +488,26 @@ public class DataType {
   }
 
   public static class Path {
+    // Format closed: ((x1,y1),...)
+    // Format open: [(x1,y1),...]
+    public static Path valueOf(String str) {
+      char type = str.charAt(0);
+      if ((type != '[' && type != '(') || (type == '[' && str.charAt(str.length() - 1) != ']')  ||
+          (type == '(' && str.charAt(str.length() - 1) != ')'))
+        throw new IllegalArgumentException("Unrecognized path format: " + str);
+      List<Point> points = new ArrayList<>();
+      int index = 1;
+      do {
+        int endParensIndex = str.indexOf(')', index);
+        if (endParensIndex == -1 || str.length() <= endParensIndex + 1)
+          throw new IllegalArgumentException("Unrecognized path format: " + str);
+        points.add(Point.valueOf(str.substring(index, endParensIndex + 1)));
+        index = endParensIndex + 2;
+      } while (str.charAt(index - 1) == ',');
+      if (index != str.length()) throw new IllegalArgumentException("Unrecognized path format: " + str);
+      return new Path(points.toArray(new Point[points.size()]), type == '(');
+    }
+
     public final Point[] points;
     public final boolean closed;
 
@@ -442,6 +541,11 @@ public class DataType {
   }
 
   public static class Polygon {
+    // Format: ((x1,y1),...)
+    public static Polygon valueOf(String str) {
+      return new Polygon(Path.valueOf(str));
+    }
+
     public final Path path;
 
     public Polygon(Path path) {
@@ -465,6 +569,15 @@ public class DataType {
   }
 
   public static class Circle {
+    // Format: <(x,y),r>
+    public static Circle valueOf(String str) {
+      int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
+      if (str.isEmpty() || str.charAt(0) != '<' || str.charAt(str.length() - 1) != '>' || commaIndex == -1)
+        throw new IllegalArgumentException("Unrecognized circle format: " + str);
+      return new Circle(Point.valueOf(str.substring(1, commaIndex)),
+          Integer.parseInt(str.substring(commaIndex + 1, str.length() - 1)));
+    }
+
     public final Point center;
     public final int radius;
 

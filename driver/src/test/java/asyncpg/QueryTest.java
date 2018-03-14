@@ -56,18 +56,17 @@ public class QueryTest extends DbTestBase {
         TypeCheck.of("numeric(9, 3)", new BigDecimal("1.030"), null),
         TypeCheck.of("numeric", new BigInteger("104000000000000000000"), null),
         TypeCheck.of("real", 1.05f, Float.MIN_VALUE,
-            /* Float.MAX_VALUE has too many digits */ 3.40282e+38f,
-            /* Float.MIN_NORMAL has too many digits */ 1.17549e-38f,
+            3.40282e+38f, // Float.MAX_VALUE has too many digits
+            1.17549e-38f, // Float.MIN_NORMAL has too many digits
             0.0f, -0.0f, Float.NEGATIVE_INFINITY, Float.POSITIVE_INFINITY, null),
         TypeCheck.of("double precision", 106d, Double.MIN_VALUE,
-            /* Double.MAX_VALUE has too many digits */ 1.7976931348623e+308d,
-            /* Double.MIN_NORMAL has too many digits */ 2.2250738585072e-308d,
+            1.7976931348623e+308d, // Double.MAX_VALUE has too many digits
+            2.2250738585072e-308d, // Double.MIN_NORMAL has too many digits
             0.0d, -0.0d, Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, Double.NaN, null),
         TypeCheck.of("smallserial", (short) 107, Short.MIN_VALUE, Short.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("serial", 108, Integer.MIN_VALUE, Integer.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("bigserial", 109L, Long.MIN_VALUE, Long.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("money", new DataType.Money("$", new BigDecimal("1.10")), null),
-        TypeCheck.of("money", new BigDecimal("1.11"), null).multiDimensionalArrayNotSupported(),
         TypeCheck.of("varchar(10)", "test1", "t\"es\"t'2", null),
         TypeCheck.of("char(10)", "test3", "t\"es\"t'4", null).overrideEquals((exp, act) ->
             (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
