@@ -1,6 +1,5 @@
 package asyncpg;
 
-import asyncpg.nio.AsynchronousSocketChannelConnectionIo;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.Map;
@@ -27,7 +26,7 @@ public class Config {
 
   @SuppressWarnings("initialization")
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
-      () -> AsynchronousSocketChannelConnectionIo.connect(this);
+      () -> ConnectionIo.AsynchronousSocketChannel.connect(this);
 
   public Config hostname(String hostname) { this.hostname = hostname; return this; }
   public Config port(int port) { this.port = port; return this; }

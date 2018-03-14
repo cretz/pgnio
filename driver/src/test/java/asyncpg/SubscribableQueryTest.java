@@ -22,7 +22,6 @@ public class SubscribableQueryTest extends DbTestBase {
       conn.terminated(conn.simpleQueryExec("LISTEN test_notifications").thenCompose(__ -> {
         conn.notifications().subscribe(notification -> {
           try {
-            // Add and wait a sec...
             notifications.put(notification);
             if (listenStopAfterReceipt.get()) return CompletableFuture.completedFuture(null);
             return conn.unsolicitedMessageTick(30, TimeUnit.SECONDS);
