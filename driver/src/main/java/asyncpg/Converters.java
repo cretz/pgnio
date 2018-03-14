@@ -39,6 +39,8 @@ public interface Converters {
 
   @FunctionalInterface
   interface To<T> {
+    default char arrayDelimiter() { return ','; }
+
     default @Nullable T convertToNullable(
         QueryMessage.RowMeta.Column column, byte@Nullable [] bytes) {
       return convertToNullable(column.dataTypeOid, column.textFormat, bytes);
@@ -67,6 +69,8 @@ public interface Converters {
       }
       return false;
     }
+
+    default char arrayDelimiter() { return ','; }
 
     void convertFrom(boolean textFormat, T obj, BufWriter buf);
   }
@@ -105,13 +109,25 @@ public interface Converters {
       from.put(BigDecimal.class.getName(), convertTextFromItem(Object::toString));
       from.put(BigInteger.class.getName(), convertTextFromItem(Object::toString));
       from.put(Boolean.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Box.class.getName(), new Converters.From<Box>() {
+        final Converters.From<Box> delegate = convertTextFromItem(Object::toString);
+        @Override
+        public char arrayDelimiter() { return ';'; }
+        @Override
+        public void convertFrom(boolean textFormat, Box obj, BufWriter buf) {
+          delegate.convertFrom(textFormat, obj, buf);
+        }
+      });
       from.put(ByteBuffer.class.getName(), convertTextFromItem((ByteBuffer v) ->
           "\\x" + Util.bytesToHex(Arrays.copyOfRange(v.array(), v.position(), v.limit()))));
       from.put(Character.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Circle.class.getName(), convertTextFromItem(Object::toString));
       from.put(Double.class.getName(), convertTextFromItem(Object::toString));
       from.put(Float.class.getName(), convertTextFromItem(Object::toString));
       from.put(Integer.class.getName(), convertTextFromItem(Object::toString));
       from.put(Interval.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Line.class.getName(), convertTextFromItem(Object::toString));
+      from.put(LineSegment.class.getName(), convertTextFromItem(Object::toString));
       from.put(LocalDate.class.getName(), convertTextFromItem(DateTimeFormatter.ISO_LOCAL_DATE::format));
       from.put(LocalDateTime.class.getName(), convertTextFromItem(TIMESTAMP_FORMAT::format));
       from.put(LocalTime.class.getName(), convertTextFromItem(DateTimeFormatter.ISO_LOCAL_TIME::format));
@@ -119,7 +135,9 @@ public interface Converters {
       from.put(Money.class.getName(), convertTextFromItem(Object::toString));
       from.put(OffsetDateTime.class.getName(), convertTextFromItem(TIMESTAMPTZ_FORMAT::format));
       from.put(OffsetTime.class.getName(), convertTextFromItem(TIMETZ_FORMAT::format));
+      from.put(Path.class.getName(), convertTextFromItem(Object::toString));
       from.put(Point.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Polygon.class.getName(), convertTextFromItem(Object::toString));
       from.put(Short.class.getName(), convertTextFromItem(Object::toString));
       from.put(String.class.getName(), convertTextFromItem(Object::toString));
       FROM_CONVERTERS = Collections.unmodifiableMap(from);
@@ -134,18 +152,31 @@ public interface Converters {
       to.put(BigInteger.class.getName(), convertTextToItem(BigInteger::new,
           DataType.INT2, DataType.INT4, DataType.INT8, DataType.NUMERIC));
       to.put(Boolean.class.getName(), convertTextBytesToItem(v -> v[0] == 't', DataType.BOOL));
+      to.put(Box.class.getName(), new Converters.To<Box>() {
+        @SuppressWarnings("type.argument.type.incompatible")
+        final Converters.To<Box> delegate = convertTextToItem(Box::valueOf, DataType.BOX);
+        @Override
+        public char arrayDelimiter() { return ';'; }
+        @Override
+        public @Nullable Box convertTo(int dataTypeOid, boolean textFormat, byte[] bytes) {
+          return delegate.convertTo(dataTypeOid, textFormat, bytes);
+        }
+      });
       to.put(ByteBuffer.class.getName(), convertTextToItem(v -> {
         if (!v.startsWith("\\x")) throw new IllegalArgumentException("Expected bytea type");
         return ByteBuffer.wrap(Util.hexToBytes(v.substring(2)));
       }, DataType.BYTEA));
       to.put(Character.class.getName(), convertTextToItem(v -> v == null || v.length() != 1 ? null : v.charAt(0),
           DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.CHAR));
+      to.put(Circle.class.getName(), convertTextToItem(Circle::valueOf, DataType.CIRCLE));
       to.put(Double.class.getName(), convertTextToItem(Double::valueOf,
           DataType.INT2, DataType.INT4, DataType.INT8, DataType.NUMERIC, DataType.FLOAT4, DataType.FLOAT8));
       to.put(Float.class.getName(), convertTextToItem(Float::valueOf,
           DataType.INT2, DataType.INT4, DataType.INT8, DataType.NUMERIC, DataType.FLOAT4));
       to.put(Integer.class.getName(), convertTextToItem(Integer::valueOf, DataType.INT2, DataType.INT4));
       to.put(Interval.class.getName(), convertTextToItem(Interval::valueOf, DataType.INTERVAL));
+      to.put(Line.class.getName(), convertTextToItem(Line::valueOf, DataType.LINE));
+      to.put(LineSegment.class.getName(), convertTextToItem(LineSegment::valueOf, DataType.LSEG));
       to.put(LocalDate.class.getName(), convertTextToItem(v -> LocalDate.parse(v, DateTimeFormatter.ISO_LOCAL_DATE),
           DataType.DATE));
       to.put(LocalDateTime.class.getName(), convertTextToItem(v -> LocalDateTime.parse(v, TIMESTAMP_FORMAT),
@@ -157,7 +188,9 @@ public interface Converters {
       to.put(OffsetDateTime.class.getName(), convertTextToItem(v -> OffsetDateTime.parse(v, TIMESTAMPTZ_FORMAT),
           DataType.TIMESTAMPTZ));
       to.put(OffsetTime.class.getName(), convertTextToItem(v -> OffsetTime.parse(v, TIMETZ_FORMAT), DataType.TIMETZ));
+      to.put(Path.class.getName(), convertTextToItem(Path::valueOf, DataType.PATH));
       to.put(Point.class.getName(), convertTextToItem(Point::valueOf, DataType.POINT));
+      to.put(Polygon.class.getName(), convertTextToItem(Polygon::valueOf, DataType.POLYGON));
       to.put(Short.class.getName(), convertTextToItem(Short::valueOf, DataType.INT2));
       to.put(String.class.getName(), convertTextToItem(Function.identity(),
           DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.NAME,

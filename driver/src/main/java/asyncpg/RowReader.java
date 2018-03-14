@@ -91,14 +91,22 @@ public class RowReader {
     Converters.BuiltIn.assertNotBinary(col.textFormat);
     List<T> ret = new ArrayList<>();
     char[] chars = Util.charsFromBytes(bytes);
-    int index = readArray(col, chars, 0, ret, typ);
+    int index = readArray(col, chars, 0, ret, typ, getArrayDelimiter(typ));
     if (index != chars.length - 1) throw new IllegalArgumentException("Unexpected chars after array end");
     return (T) ret.toArray();
   }
 
   @SuppressWarnings("unchecked")
+  protected char getArrayDelimiter(Class typ) {
+    Converters.To conv = getConverter(typ);
+    if (conv != null) return conv.arrayDelimiter();
+    if (typ.isArray()) return getArrayDelimiter(typ.getComponentType());
+    return ',';
+  }
+
+  @SuppressWarnings("unchecked")
   protected <@Nullable T> int readArray(QueryMessage.RowMeta.Column col, char[] chars,
-      int index, List<T> list, Class<T> typ) {
+      int index, List<T> list, Class<T> typ, char delim) {
     if (chars.length > index + 1 && chars[index] != '{')
       throw new IllegalArgumentException("Array must start with brace");
     StringBuilder strBuf = new StringBuilder();
@@ -112,13 +120,13 @@ public class RowReader {
     while (chars.length > index && chars[index] != '}') {
       // If we're not the first, expect a comma
       if (!list.isEmpty()) {
-        if (chars[index] != ',') throw new IllegalArgumentException("Missing comma");
+        if (chars[index] != delim) throw new IllegalArgumentException("Missing delimiter");
         index++;
       }
       // Check null, or quoted string, or sub array, or just value
       if (chars[index] == 'N' && chars.length > index + 4 && chars[index + 1] == 'U' &&
           chars[index + 2] == 'L' && chars[index + 3] == 'L' &&
-          (chars[index + 4] == ',' || chars[index + 4] == '}' || Character.isWhitespace(chars[index + 4]))) {
+          (chars[index + 4] == delim || chars[index + 4] == '}' || Character.isWhitespace(chars[index + 4]))) {
         list.add(null);
         index += 4;
       } else if (chars[index] == '"') {
@@ -137,14 +145,14 @@ public class RowReader {
         index++;
       } else if (chars[index] == '{') {
         List subList = new ArrayList();
-        index = readArray(col.child(DataType.UNSPECIFIED), chars, index, subList, subType);
+        index = readArray(col.child(DataType.UNSPECIFIED), chars, index, subList, subType, delim);
         if (chars[index] != '}') throw new IllegalArgumentException("Unexpected array end");
         index++;
         list.add((T) subList.toArray());
       } else {
-        // // Just run until the next comma or end brace
+        // // Just run until the next delim or end brace
         int startIndex = index;
-        while (chars.length > index && chars[index] != ',' && chars[index] != '}') index++;
+        while (chars.length > index && chars[index] != delim && chars[index] != '}') index++;
         if (chars.length <= index) throw new IllegalArgumentException("Unexpected value end");
         char[] subChars = Arrays.copyOfRange(chars, startIndex, index);
         list.add((T) get(subCol, Util.bytesFromCharBuffer(CharBuffer.wrap(subChars)), subType));

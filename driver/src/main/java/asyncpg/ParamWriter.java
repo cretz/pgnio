@@ -77,6 +77,9 @@ public class ParamWriter {
     }
 
     @Override
+    public char arrayDelimiter() { return componentConverter.arrayDelimiter(); }
+
+    @Override
     public boolean mustBeQuotedWhenUsedInSql(Object obj) { return topLevel; }
 
     @Override
@@ -85,8 +88,9 @@ public class ParamWriter {
       Converters.BuiltIn.assertNotBinary(textFormat);
       buf.writeByte((byte) '{');
       int length = Array.getLength(obj);
+      byte delim = (byte) componentConverter.arrayDelimiter();
       for (int i = 0; i < length; i++) {
-        if (i > 0) buf.writeByte((byte) ',');
+        if (i > 0) buf.writeByte(delim);
         Object subObj = Array.get(obj, i);
         if (subObj == null) {
           buf.writeString("NULL");

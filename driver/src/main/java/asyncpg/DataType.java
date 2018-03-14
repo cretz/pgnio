@@ -422,13 +422,13 @@ public class DataType {
   }
 
   public static class LineSegment {
-    // Format: ((x1,y1),(x2,y2))
+    // Format: [(x1,y1),(x2,y2)]
     public static LineSegment valueOf(String str) {
       int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
-      if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
+      if (str.isEmpty() || str.charAt(0) != '[' || str.charAt(str.length() - 1) != ']' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized segment format: " + str);
       return new LineSegment(Point.valueOf(str.substring(1, commaIndex)),
-          Point.valueOf(str.substring(commaIndex + 1, str.length() - 2)));
+          Point.valueOf(str.substring(commaIndex + 1, str.length() - 1)));
     }
 
     public final Point point1;
@@ -451,25 +451,26 @@ public class DataType {
     public int hashCode() { return Objects.hash(point1, point2); }
 
     @Override
-    public String toString() { return "(" + point1 + "," + point2 + ")"; }
+    public String toString() { return "[" + point1 + "," + point2 + "]"; }
   }
 
   public static class Box {
-    // Format: ((x1,y1),(x2,y2))
+    // Format: (x1,y1),(x2,y2)
     public static Box valueOf(String str) {
       int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
       if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized box format: " + str);
-      return new Box(Point.valueOf(str.substring(1, commaIndex)),
-          Point.valueOf(str.substring(commaIndex + 1, str.length() - 2)));
+      return new Box(Point.valueOf(str.substring(0, commaIndex)),
+          Point.valueOf(str.substring(commaIndex + 1, str.length())));
     }
 
     public final Point point1;
     public final Point point2;
 
+    // Note, these may be switched before set on fields to put upper right in point 1 and lower left in point 2
     public Box(Point point1, Point point2) {
-      this.point1 = point1;
-      this.point2 = point2;
+      this.point1 = new Point(Math.max(point1.x, point2.x), Math.max(point1.y, point2.y));
+      this.point2 = new Point(Math.min(point1.x, point2.x), Math.min(point1.y, point2.y));
     }
 
     @Override
@@ -484,7 +485,7 @@ public class DataType {
     public int hashCode() { return Objects.hash(point1, point2); }
 
     @Override
-    public String toString() { return "(" + point1 + "," + point2 + ")"; }
+    public String toString() { return point1 + "," + point2; }
   }
 
   public static class Path {
@@ -547,6 +548,8 @@ public class DataType {
     }
 
     public final Path path;
+
+    public Polygon(Point... points) { this(new Path(points, true)); }
 
     public Polygon(Path path) {
       if (!path.closed) throw new IllegalArgumentException("Polygon paths are closed");

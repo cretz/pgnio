@@ -18,6 +18,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 
+import static asyncpg.DataType.*;
+
 @RunWith(Parameterized.class)
 @SuppressWarnings("unchecked")
 public class QueryTest extends DbTestBase {
@@ -66,7 +68,7 @@ public class QueryTest extends DbTestBase {
         TypeCheck.of("smallserial", (short) 107, Short.MIN_VALUE, Short.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("serial", 108, Integer.MIN_VALUE, Integer.MAX_VALUE).arrayNotSupported(),
         TypeCheck.of("bigserial", 109L, Long.MIN_VALUE, Long.MAX_VALUE).arrayNotSupported(),
-        TypeCheck.of("money", new DataType.Money("$", new BigDecimal("1.10")), null),
+        TypeCheck.of("money", new Money("$", new BigDecimal("1.10")), null),
         TypeCheck.of("varchar(10)", "test1", "t\"es\"t'2", null),
         TypeCheck.of("char(10)", "test3", "t\"es\"t'4", null).overrideEquals((exp, act) ->
             (exp == null && act == null) || (exp != null && act.length() == 10 && exp.equals(act.trim()))),
@@ -84,13 +86,20 @@ public class QueryTest extends DbTestBase {
             ZoneOffset.ofHoursMinutes(-5, -30)).atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime(), null),
         TypeCheck.of("timestamp(2) with time zone", OffsetDateTime.of(2018, 1, 5, 0, 2, 4, 230000000,
             ZoneOffset.ofHoursMinutes(-6, -30)).atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime(), null),
-        TypeCheck.of("interval", new DataType.Interval(Period.of(1, 2, 3), Duration.ofSeconds(4000, 500000)),
-            new DataType.Interval(Period.of(-1, -2, -3), Duration.ofSeconds(-4000, -500000)), null),
+        TypeCheck.of("interval", new Interval(Period.of(1, 2, 3), Duration.ofSeconds(4000, 500000)),
+            new Interval(Period.of(-1, -2, -3), Duration.ofSeconds(-4000, -500000)), null),
         TypeCheck.of("boolean", true, false, null),
         TypeCheck.of("mood", "sad", "ok", "happy", null).
             beforeUse(conn -> conn.simpleQueryExec("CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy')")).
             afterUse(conn -> conn.simpleQueryExec("DROP TYPE mood")),
-        TypeCheck.of("point", new DataType.Point(30, 40), null)
+        TypeCheck.of("point", new Point(30, 40), null),
+        TypeCheck.of("line", new Line(1, 2, 3), null),
+        TypeCheck.of("lseg", new LineSegment(new Point(1, 2), new Point(3, 4)), null),
+        TypeCheck.of("box", new Box(new Point(5, 6), new Point(7, 8)), null),
+        TypeCheck.of("path", new Path(new Point[] { new Point(9, 10), new Point(10, 11) }, true),
+            new Path(new Point[] { new Point(12, 13), new Point(14, 15) }, false), null),
+        TypeCheck.of("polygon", new Polygon(new Point(16, 17), new Point(18, 19)), null),
+        TypeCheck.of("circle", new Circle(new Point(20, 21), 22), null)
     ));
     // Array versions
     List<TypeCheck> arrayTypeChecks = new ArrayList<>();
