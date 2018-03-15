@@ -1,0 +1,3 @@
+Files here created with:
+
+    openssl req -new -x509 -nodes -text -out server.crt -keyout server.key -subj "/CN=localhost"

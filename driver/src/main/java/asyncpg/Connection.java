@@ -210,6 +210,36 @@ public abstract class Connection implements AutoCloseable {
     }
 
     public CompletableFuture<QueryReadyConnection.AutoCommit> auth() {
+      CompletableFuture<?> sslComplete;
+      if (ctx.config.ssl == null || ctx.config.ssl) sslComplete = startSsl(ctx.config.ssl != null);
+      else sslComplete = CompletableFuture.completedFuture(null);
+      return sslComplete.thenCompose(__ -> doAuth());
+    }
+
+    protected CompletableFuture<Void> startSsl(boolean required) {
+      log.log(Level.FINE, "{0} Starting SSL", ctx);
+      // Send SSLRequest
+      ctx.buf.clear();
+      ctx.writeInt(8).writeInt(80877103);
+      ctx.buf.flip();
+      return writeFrontendMessage().thenCompose(__ -> {
+        // Just a single byte of 'S' or 'N' (yes or no)
+        ctx.buf.clear().limit(1);
+        return ctx.io.readFull(ctx.buf, ctx.config.defaultTimeout, ctx.config.defaultTimeoutUnit).thenCompose(___ -> {
+          char response = (char) ctx.buf.get(0);
+          if (response == 'N') {
+            if (required) throw new DriverException.ServerSslNotSupported();
+            log.log(Level.INFO, "{0} SSL not supported by server, continuing unencrypted", ctx);
+            return CompletableFuture.completedFuture(null);
+          }
+          if (response != 'S') throw new IllegalArgumentException("Unrecognized SSL response char: " + response);
+          // TODO
+          throw new UnsupportedOperationException("SSL not supported by client library yet");
+        });
+      });
+    }
+
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> doAuth() {
       log.log(Level.FINE, "{0} Authenticating", ctx);
       // Send startup message
       ctx.buf.clear();

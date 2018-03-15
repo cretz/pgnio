@@ -12,17 +12,24 @@ public abstract class DbTestBase extends TestBase {
   @BeforeClass
   public synchronized static void initDb() {
     if (db == null) {
-      db = EmbeddedDb.newFromConfig(new EmbeddedDb.EmbeddedDbConfig().
-          dbConf(new Config().
-              hostname("localhost").port(5433).database("asyncpg_test").username("some_user").password("some_pass")));
+      db = EmbeddedDb.newFromConfig(new EmbeddedDb.EmbeddedDbConfig().dbConf(newDefaultConfig()));
       // Add a shutdown hook to close it
       Runtime.getRuntime().addShutdownHook(new Thread(db::close));
     }
   }
 
+  protected static Config newDefaultConfig() {
+    return new Config().hostname("localhost").port(5433).
+        database("asyncpg_test").username("some_user").password("some_pass");
+  }
+
   protected <T> T withConnectionSync(Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
+    return withConnectionSync(db.conf().dbConf, fn);
+  }
+
+  protected <T> T withConnectionSync(Config conf, Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
     try {
-      return Connection.authed(db.conf().dbConf).thenCompose(conn -> conn.terminated(fn.apply(conn))).get();
+      return Connection.authed(conf).thenCompose(conn -> conn.terminated(fn.apply(conn))).get();
     } catch (InterruptedException | ExecutionException e) { throw new RuntimeException(e); }
   }
 }

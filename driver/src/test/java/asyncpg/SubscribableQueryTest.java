@@ -3,6 +3,9 @@ package asyncpg;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -41,12 +44,12 @@ public class SubscribableQueryTest extends DbTestBase {
 
     // Wait for listen conn to exit and confirm notifications
     listen.get();
-    Subscribable.Notification[] expected = new Subscribable.Notification[] {
+    List<Subscribable.Notification> expected = Arrays.asList(
         new Subscribable.Notification(notifyProcessId, "test_notifications", ""),
         new Subscribable.Notification(notifyProcessId, "test_notifications", "test1"),
         new Subscribable.Notification(notifyProcessId, "test_notifications", "test2")
-    };
-    Assert.assertArrayEquals(expected, notifications.toArray(new Subscribable.Notification[0]));
+    );
+    Assert.assertEquals(expected, new ArrayList<>(notifications));
   }
 
   @Test

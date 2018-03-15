@@ -13,7 +13,8 @@ public class Config {
   public String username = "postgres";
   public @Nullable String password;
   public @Nullable String database;
-  public boolean ssl;
+  // Null means try but fallback, true means required, false means never
+  public @Nullable Boolean ssl = false;
   public long defaultTimeout;
   public TimeUnit defaultTimeoutUnit = TimeUnit.MILLISECONDS;
   public boolean directBuffer = true;
@@ -26,14 +27,15 @@ public class Config {
 
   @SuppressWarnings("initialization")
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
-      () -> ConnectionIo.AsynchronousSocketChannel.connect(this);
+      () -> ConnectionIo.AsyncSocketChannel.connect(this);
 
   public Config hostname(String hostname) { this.hostname = hostname; return this; }
   public Config port(int port) { this.port = port; return this; }
   public Config username(String username) { this.username = username; return this; }
   public Config password(String password) { this.password = password; return this; }
   public Config database(String database) { this.database = database; return this; }
-  public Config ssl(boolean ssl) { this.ssl = ssl; return this; }
+  // Null means try but fallback, true means required, false means never
+  public Config ssl(@Nullable Boolean ssl) { this.ssl = ssl; return this; }
   public Config defaultTimeout(long defaultTimeout, TimeUnit defaultTimeoutUnit) {
     this.defaultTimeout = defaultTimeout;
     this.defaultTimeoutUnit = defaultTimeoutUnit;

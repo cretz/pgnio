@@ -6,6 +6,10 @@ public abstract class DriverException extends RuntimeException {
   public DriverException(String message, Throwable cause) { super(message, cause); }
   public DriverException(Throwable cause) { super(cause); }
 
+  public static class ServerSslNotSupported extends DriverException {
+    public ServerSslNotSupported() { super("SSL required but server does not support SSL"); }
+  }
+
   public static class NonGeneralMessageOnTick extends DriverException {
     public NonGeneralMessageOnTick(char typ) { super("Expected general message, but got message of type: " + typ); }
   }
