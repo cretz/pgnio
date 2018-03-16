@@ -82,8 +82,8 @@ public abstract class Connection implements AutoCloseable {
     return ctx.io.readFull(ctx.buf, timeout, timeoutUnit).thenCompose(__ -> {
       // Now that we have the size, make sure we have enough capacity to fulfill it and reset the limit
       int messageSize = ctx.buf.getInt(1);
-      if (log.isLoggable(Level.FINEST))
-        log.log(Level.FINEST, "{0} Read message header of type {1} with size {2}",
+      if (log.isLoggable(Level.FINER))
+        log.log(Level.FINER, "{0} Read message header of type {1} with size {2}",
             new Object[] { ctx, (char) ctx.buf.get(0), messageSize });
       ctx.writeEnsureCapacity(messageSize).limit(1 + messageSize);
       // Fill it with the rest of the message and flip it for use
@@ -162,7 +162,8 @@ public abstract class Connection implements AutoCloseable {
 
   public static class Context extends BufWriter.Simple<Context> {
     public final Config config;
-    public final ConnectionIo io;
+    // Note, this is replaced when going SSL
+    public ConnectionIo io;
     protected final Subscribable<Subscribable.Notice> noticeSubscribable = new Subscribable<>();
     protected final Subscribable<Subscribable.Notification> notificationSubscribable = new Subscribable<>();
     protected final Subscribable<Subscribable.ParameterStatus> parameterStatusSubscribable = new Subscribable<>();
@@ -233,8 +234,10 @@ public abstract class Connection implements AutoCloseable {
             return CompletableFuture.completedFuture(null);
           }
           if (response != 'S') throw new IllegalArgumentException("Unrecognized SSL response char: " + response);
-          // TODO
-          throw new UnsupportedOperationException("SSL not supported by client library yet");
+          return ctx.config.sslWrapper.apply(ctx.io).thenApply(sslIo -> {
+            ctx.io = sslIo;
+            return null;
+          });
         });
       });
     }

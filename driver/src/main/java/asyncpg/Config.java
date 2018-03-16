@@ -2,9 +2,12 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import javax.net.ssl.SSLContext;
+import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class Config {
@@ -28,6 +31,20 @@ public class Config {
   @SuppressWarnings("initialization")
   public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
       () -> ConnectionIo.AsyncSocketChannel.connect(this);
+
+  // Must be initialized
+  // TODO: trust createSSLEngine is thread safe?
+  public @Nullable SSLContext sslContextOverride;
+
+  @SuppressWarnings("initialization")
+  public Function<ConnectionIo, CompletableFuture<? extends ConnectionIo>> sslWrapper = (io) -> {
+    try {
+      SSLContext ctx = sslContextOverride == null ? SSLContext.getDefault() : sslContextOverride;
+      ConnectionIo.Ssl sslIo = new ConnectionIo.Ssl(io, ctx.createSSLEngine(),
+          directBuffer, defaultTimeout, defaultTimeoutUnit);
+      return sslIo.start().thenApply(__ -> sslIo);
+    } catch (NoSuchAlgorithmException e) { throw new RuntimeException(e); }
+  };
 
   public Config hostname(String hostname) { this.hostname = hostname; return this; }
   public Config port(int port) { this.port = port; return this; }
@@ -53,6 +70,15 @@ public class Config {
   public Config paramWriter(ParamWriter paramWriter) { this.paramWriter = paramWriter; return this; }
   public Config connector(Supplier<CompletableFuture<? extends ConnectionIo>> connector) {
     this.connector = connector;
+    return this;
+  }
+  // Should come initialized
+  public Config sslContextOverride(SSLContext sslContextOverride) {
+    this.sslContextOverride = sslContextOverride;
+    return this;
+  }
+  public Config sslWrapper(Function<ConnectionIo, CompletableFuture<? extends ConnectionIo>> sslWrapper) {
+    this.sslWrapper = sslWrapper;
     return this;
   }
 }

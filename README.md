@@ -10,5 +10,4 @@
 * More data types and their tests (see QueryTest)
 * Prepared reuse tests
 * Bound reuse tests
-* SSL
 * Streaming/logical replication

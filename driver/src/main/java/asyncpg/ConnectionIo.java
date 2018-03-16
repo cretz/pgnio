@@ -1,7 +1,5 @@
 package asyncpg;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLEngineResult;
 import javax.net.ssl.SSLException;
@@ -119,7 +117,6 @@ public interface ConnectionIo {
 
   class Ssl implements ConnectionIo {
     // Lots of help from, among others, https://github.com/jesperdj/sslclient
-
     protected static final Logger log = Logger.getLogger(Ssl.class.getName());
 
     protected static ByteBuffer allocBuf(boolean directBuffer, int amount) {
@@ -132,19 +129,22 @@ public interface ConnectionIo {
     protected final boolean directBuffer;
     protected final long defaultTimeout;
     protected final TimeUnit defaultTimeoutUnit;
-    protected ByteBuffer tempReadBuf;
+    protected ByteBuffer appReadBuf;
+    protected ByteBuffer appWriteBuf;
     protected ByteBuffer netReadBuf;
     protected ByteBuffer netWriteBuf;
 
     public Ssl(ConnectionIo underlying, SSLEngine sslEngine, boolean directBuffer,
-        int initialTempReadBufSize, long defaultTimeout, TimeUnit defaultTimeoutUnit) {
+        long defaultTimeout, TimeUnit defaultTimeoutUnit) {
       this.underlying = underlying;
+      sslEngine.setUseClientMode(true);
       this.sslEngine = sslEngine;
       this.directBuffer = directBuffer;
       this.defaultTimeout = defaultTimeout;
       this.defaultTimeoutUnit = defaultTimeoutUnit;
 
-      tempReadBuf = allocBuf(directBuffer, initialTempReadBufSize);
+      appReadBuf = allocBuf(directBuffer, sslEngine.getSession().getApplicationBufferSize());
+      appWriteBuf = allocBuf(directBuffer, sslEngine.getSession().getApplicationBufferSize());
       netReadBuf = allocBuf(directBuffer, sslEngine.getSession().getPacketBufferSize());
       netWriteBuf = allocBuf(directBuffer, sslEngine.getSession().getPacketBufferSize());
     }
@@ -152,32 +152,36 @@ public interface ConnectionIo {
     @Override
     public CompletableFuture<Void> close() {
       sslEngine.closeOutbound();
-      return handshakeUpdate(null, defaultTimeout, defaultTimeoutUnit).thenCompose(__ -> underlying.close());
+      return handshakeUpdate(defaultTimeout, defaultTimeoutUnit).thenCompose(__ -> underlying.close());
     }
 
     @Override
     public int getLocalPort() { return underlying.getLocalPort(); }
 
     public CompletableFuture<Void> start() {
+      log.log(Level.FINER, "Starting SSL handshake");
       try {
         sslEngine.beginHandshake();
       } catch (SSLException e) { throw new RuntimeException(e); }
-      return handshakeUpdate(null, defaultTimeout, defaultTimeoutUnit);
+      return handshakeUpdate(defaultTimeout, defaultTimeoutUnit);
     }
 
     @Override
     public CompletableFuture<Void> readSome(ByteBuffer buf, long timeout, TimeUnit timeoutUnit) {
-      // If there's any, use it
-      if (tempReadBuf.hasRemaining()) {
+      appReadBuf.flip();
+      if (log.isLoggable(Level.FINEST))
+        log.log(Level.FINEST, "Reading SSL into {0} from app buf {1}", new Object[] { buf, appReadBuf });
+      // If there is anything, we use it
+      if (appReadBuf.hasRemaining()) {
         Integer prevLimit = null;
         // If we can full up the buf, even better
-        if (tempReadBuf.remaining() >= buf.remaining()) {
-          prevLimit = tempReadBuf.limit();
-          tempReadBuf.limit(tempReadBuf.position() + buf.remaining());
+        if (appReadBuf.remaining() >= buf.remaining()) {
+          prevLimit = appReadBuf.limit();
+          appReadBuf.limit(appReadBuf.position() + buf.remaining());
         }
-        buf.put(tempReadBuf);
-        if (prevLimit != null) tempReadBuf.limit(prevLimit);
-        tempReadBuf.compact().flip();
+        buf.put(appReadBuf);
+        if (prevLimit != null) appReadBuf.limit(prevLimit);
+        appReadBuf.compact();
         return CompletableFuture.completedFuture(null);
       }
       // Otherwise, unwrap and try again
@@ -186,15 +190,16 @@ public interface ConnectionIo {
 
     @Override
     public CompletableFuture<Void> writeFull(ByteBuffer buf, long timeout, TimeUnit timeoutUnit) {
-      return wrap(buf, timeout, timeoutUnit);
+      ensureRemaining(appWriteBuf, buf.remaining());
+      appWriteBuf.put(buf);
+      return wrap(timeout, timeoutUnit);
     }
 
-    protected CompletableFuture<Void> handshakeUpdate(@Nullable ByteBuffer writeBuf,
-        long timeout, TimeUnit timeoutUnit) {
-      return handshakeUpdate(writeBuf, timeout, timeoutUnit, sslEngine.getHandshakeStatus());
+    protected CompletableFuture<Void> handshakeUpdate(long timeout, TimeUnit timeoutUnit) {
+      return handshakeUpdate(timeout, timeoutUnit, sslEngine.getHandshakeStatus());
     }
 
-    protected CompletableFuture<Void> handshakeUpdate(@Nullable ByteBuffer writeBuf, long timeout, TimeUnit timeoutUnit,
+    protected CompletableFuture<Void> handshakeUpdate(long timeout, TimeUnit timeoutUnit,
         SSLEngineResult.HandshakeStatus handshakeStatus) {
       log.log(Level.FINEST, "Handshake update for {0}", handshakeStatus);
       switch (handshakeStatus) {
@@ -205,17 +210,17 @@ public interface ConnectionIo {
             log.log(Level.FINE, "Handshake finished, protocol: {0}", sslEngine.getSession().getProtocol());
           return CompletableFuture.completedFuture(null);
         case NEED_WRAP:
-          if (writeBuf == null) throw new IllegalStateException("Unexpected need for wrap with no buf");
-          return wrap(writeBuf, timeout, timeoutUnit);
+          return wrap(timeout, timeoutUnit);
         case NEED_UNWRAP:
           return unwrap(timeout, timeoutUnit);
         case NEED_TASK:
           while (true) {
             Runnable task = sslEngine.getDelegatedTask();
             if (task == null) break;
+            log.log(Level.FINEST, "Running task: {0}", task);
             task.run();
           }
-          return handshakeUpdate(writeBuf, timeout, timeoutUnit);
+          return handshakeUpdate(timeout, timeoutUnit);
         default:
           throw new IllegalStateException("Unknown status: " + handshakeStatus);
       }
@@ -227,27 +232,33 @@ public interface ConnectionIo {
       return allocBuf(directBuffer, buf.remaining() + needed).put(buf);
     }
 
-    protected CompletableFuture<Void> wrap(ByteBuffer writeBuf, long timeout, TimeUnit timeoutUnit) {
+    protected CompletableFuture<Void> wrap(long timeout, TimeUnit timeoutUnit) {
+      appWriteBuf.flip();
+      if (log.isLoggable(Level.FINEST))
+        log.log(Level.FINEST, "Wrap from {0} into {1}", new Object[] { appWriteBuf, netWriteBuf });
       SSLEngineResult result;
       try {
-        result = sslEngine.wrap(writeBuf, netWriteBuf);
+        result = sslEngine.wrap(appWriteBuf, netWriteBuf);
       } catch (SSLException e) { throw new RuntimeException(e); }
+      appWriteBuf.compact();
+      if (log.isLoggable(Level.FINEST))
+        log.log(Level.FINEST, "Wrap result {0} after {1} into {2}", new Object[] { result, appWriteBuf, netWriteBuf });
       switch (result.getStatus()) {
         case OK:
           return flushNetWriteBuf(timeout, timeoutUnit).
-              thenCompose(__ -> handshakeUpdate(writeBuf, timeout, timeoutUnit, result.getHandshakeStatus())).
+              thenCompose(__ -> handshakeUpdate(timeout, timeoutUnit, result.getHandshakeStatus())).
               thenCompose(__ -> {
                 // Wrap again if there's more
-                if (writeBuf.position() != writeBuf.limit()) return wrap(writeBuf, timeout, timeoutUnit);
+                if (appWriteBuf.position() > 0) return wrap(timeout, timeoutUnit);
                 return CompletableFuture.completedFuture(null);
               });
         case CLOSED:
           return flushNetWriteBuf(timeout, timeoutUnit).
-              thenCompose(__ -> handshakeUpdate(writeBuf, timeout, timeoutUnit, result.getHandshakeStatus())).
+              thenCompose(__ -> handshakeUpdate(timeout, timeoutUnit, result.getHandshakeStatus())).
               thenCompose(__ -> close());
         case BUFFER_OVERFLOW:
           netWriteBuf = ensureRemaining(netWriteBuf, sslEngine.getSession().getPacketBufferSize());
-          return wrap(writeBuf, timeout, timeoutUnit);
+          return wrap(timeout, timeoutUnit);
         default:
           throw new IllegalStateException("Unknown status: " + result.getStatus());
       }
@@ -255,26 +266,33 @@ public interface ConnectionIo {
 
     protected CompletableFuture<Void> flushNetWriteBuf(long timeout, TimeUnit timeoutUnit) {
       netWriteBuf.flip();
+      log.log(Level.FINEST, "Flushing {0}", netWriteBuf);
       return underlying.writeFull(netWriteBuf, timeout, timeoutUnit).thenRun(netWriteBuf::clear);
     }
 
     protected CompletableFuture<Void> unwrap(long timeout, TimeUnit timeoutUnit) {
+      log.log(Level.FINEST, "Unwrap begin on {0}", netReadBuf);
       // If net buf is empty, do read first
       CompletableFuture<Void> readComplete;
       if (netReadBuf.position() == 0) readComplete = underlying.readSome(netReadBuf, timeout, timeoutUnit);
       else readComplete = CompletableFuture.completedFuture(null);
       return readComplete.thenCompose(__ -> {
         netReadBuf.flip();
+        if (log.isLoggable(Level.FINEST))
+          log.log(Level.FINEST, "Unwrap from {0} into {1}", new Object[] { netReadBuf, appReadBuf });
         SSLEngineResult result;
         try {
-          result = sslEngine.unwrap(netReadBuf, tempReadBuf);
+          result = sslEngine.unwrap(netReadBuf, appReadBuf);
         } catch (SSLException e) { throw new RuntimeException(e); }
+        if (log.isLoggable(Level.FINEST))
+          log.log(Level.FINEST, "Unwrap result {0} after {1} into {2}",
+              new Object[] { result, netReadBuf, appReadBuf });
         netReadBuf.compact();
         switch (result.getStatus()) {
           case OK:
-            return handshakeUpdate(null, timeout, timeoutUnit, result.getHandshakeStatus());
+            return handshakeUpdate(timeout, timeoutUnit, result.getHandshakeStatus());
           case CLOSED:
-            return handshakeUpdate(null, timeout, timeoutUnit, result.getHandshakeStatus()).thenCompose(___ -> close());
+            return handshakeUpdate(timeout, timeoutUnit, result.getHandshakeStatus()).thenCompose(___ -> close());
           case BUFFER_UNDERFLOW:
             // Increase net buf size and retry
             netReadBuf = ensureRemaining(netReadBuf, sslEngine.getSession().getPacketBufferSize());
@@ -282,7 +300,7 @@ public interface ConnectionIo {
                 thenCompose(___ -> unwrap(timeout, timeoutUnit));
           case BUFFER_OVERFLOW:
             // Increase temp buf and try again
-            tempReadBuf = ensureRemaining(tempReadBuf, sslEngine.getSession().getApplicationBufferSize());
+            appReadBuf = ensureRemaining(appReadBuf, sslEngine.getSession().getApplicationBufferSize());
             return unwrap(timeout, timeoutUnit);
           default:
             throw new IllegalStateException("Unknown status: " + result.getStatus());
