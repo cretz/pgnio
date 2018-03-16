@@ -3,6 +3,10 @@ package asyncpg;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.math.BigDecimal;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.text.ParseException;
@@ -27,6 +31,8 @@ public class DataType {
   public static final int BYTEA_ARRAY = 1001;
   public static final int CHAR = 18;
   public static final int CHAR_ARRAY = 1002;
+  public static final int CIDR = 650;
+  public static final int CIDR_ARRAY = 651;
   public static final int CIRCLE = 718;
   public static final int CIRCLE_ARRAY = 719;
   public static final int DATE = 1082;
@@ -35,6 +41,8 @@ public class DataType {
   public static final int FLOAT4_ARRAY = 1021;
   public static final int FLOAT8 = 701;
   public static final int FLOAT8_ARRAY = 1022;
+  public static final int INET = 869;
+  public static final int INET_ARRAY = 1041;
   public static final int INT2 = 21;
   public static final int INT2_ARRAY = 1005;
   public static final int INT4 = 23;
@@ -51,6 +59,10 @@ public class DataType {
   public static final int LINE_ARRAY = 629;
   public static final int LSEG = 601;
   public static final int LSEG_ARRAY = 1018;
+  public static final int MACADDR = 829;
+  public static final int MACADDR_ARRAY = 1040;
+  public static final int MACADDR8 = 774;
+  public static final int MACADDR8_ARRAY = 775;
   public static final int MONEY = 790;
   public static final int MONEY_ARRAY = 791;
   public static final int NAME = 19;
@@ -104,6 +116,8 @@ public class DataType {
     map.put(BYTEA_ARRAY, "BYTEA_ARRAY");
     map.put(CHAR, "CHAR");
     map.put(CHAR_ARRAY, "CHAR_ARRAY");
+    map.put(CIDR, "CIDR");
+    map.put(CIDR_ARRAY, "CIDR_ARRAY");
     map.put(CIRCLE, "CIRCLE");
     map.put(CIRCLE_ARRAY, "CIRCLE_ARRAY");
     map.put(DATE, "DATE");
@@ -112,6 +126,8 @@ public class DataType {
     map.put(FLOAT4_ARRAY, "FLOAT4_ARRAY");
     map.put(FLOAT8, "FLOAT8");
     map.put(FLOAT8_ARRAY, "FLOAT8_ARRAY");
+    map.put(INET, "INET");
+    map.put(INET_ARRAY, "INET_ARRAY");
     map.put(INT2, "INT2");
     map.put(INT2_ARRAY, "INT2_ARRAY");
     map.put(INT4, "INT4");
@@ -128,7 +144,10 @@ public class DataType {
     map.put(LINE_ARRAY, "LINE_ARRAY");
     map.put(LSEG, "LSEG");
     map.put(LSEG_ARRAY, "LSEG_ARRAY");
-    map.put(MONEY, "MONEY");
+    map.put(MACADDR, "MACADDR");
+    map.put(MACADDR_ARRAY, "MACADDR_ARRAY");
+    map.put(MACADDR8, "MACADDR8");
+    map.put(MACADDR8_ARRAY, "MACADDR8_ARRAY");
     map.put(MONEY_ARRAY, "MONEY_ARRAY");
     map.put(NAME, "NAME");
     map.put(NAME_ARRAY, "NAME_ARRAY");
@@ -181,10 +200,12 @@ public class DataType {
       case BPCHAR_ARRAY: return BPCHAR;
       case BYTEA_ARRAY: return BYTEA;
       case CHAR_ARRAY: return CHAR;
+      case CIDR_ARRAY: return CIDR;
       case CIRCLE_ARRAY: return CIRCLE;
       case DATE_ARRAY: return DATE;
       case FLOAT4_ARRAY: return FLOAT4;
       case FLOAT8_ARRAY: return FLOAT8;
+      case INET_ARRAY: return INET;
       case INT2_ARRAY: return INT2;
       case INT4_ARRAY: return INT4;
       case INT8_ARRAY: return INT8;
@@ -193,6 +214,8 @@ public class DataType {
       case JSONB_ARRAY: return JSONB;
       case LINE_ARRAY: return LINE;
       case LSEG_ARRAY: return LSEG;
+      case MACADDR_ARRAY: return MACADDR;
+      case MACADDR8_ARRAY: return MACADDR8;
       case MONEY_ARRAY: return MONEY;
       case NAME_ARRAY: return NAME;
       case NUMERIC_ARRAY: return NUMERIC;
@@ -602,5 +625,78 @@ public class DataType {
 
     @Override
     public String toString() { return "<" + center + "," + radius + ">"; }
+  }
+
+  public static class Inet {
+    public static Inet valueOf(String str) {
+      Integer netmask = null;
+      int slashIndex = str.lastIndexOf('/');
+      if (slashIndex != -1) {
+        netmask = Integer.valueOf(str.substring(slashIndex + 1));
+        str = str.substring(0, slashIndex);
+      }
+      try {
+        if (netmask == null) return new Inet(InetAddress.getByName(str));
+        return new Inet(InetAddress.getByName(str), netmask);
+      } catch (UnknownHostException e) { throw new RuntimeException(e); }
+    }
+
+    public final InetAddress address;
+    public final int netmask;
+
+    public Inet(InetAddress address) { this(address, address instanceof Inet4Address ? 32 : 128); }
+    public Inet(InetAddress address, int netmask) {
+      this.address = address;
+      this.netmask = netmask;
+    }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      Inet inet = (Inet) o;
+      return netmask == inet.netmask && Objects.equals(address, inet.address);
+    }
+
+    @Override
+    public int hashCode() { return Objects.hash(address, netmask); }
+
+    @Override
+    public String toString() {
+      if ((address instanceof Inet4Address && netmask == 32) ||
+          (address instanceof Inet6Address && netmask == 128)) return address.getHostAddress();
+      return address.getHostAddress() + "/" + netmask;
+    }
+  }
+
+  public static class MacAddr {
+    public static MacAddr valueOf(String str) {
+      List<String> pieces = Util.splitByChar(str, ':');
+      byte[] bytes = new byte[pieces.size()];
+      for (int i = 0; i < bytes.length; i++) bytes[i] = Util.hexToByte(pieces.get(i));
+      return new MacAddr(bytes);
+    }
+
+    public final byte[] address;
+
+    public MacAddr(byte[] address) { this.address = address; }
+
+    @Override
+    public boolean equals(@Nullable Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      MacAddr macAddr = (MacAddr) o;
+      return Arrays.equals(address, macAddr.address);
+    }
+
+    @Override
+    public int hashCode() { return Arrays.hashCode(address); }
+
+    @Override
+    public String toString() {
+      String[] pieces = new String[address.length];
+      for (int i = 0; i < address.length; i++) pieces[i] = Util.byteToHex(address[i]);
+      return String.join(":", pieces);
+    }
   }
 }

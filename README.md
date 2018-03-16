@@ -11,3 +11,4 @@
 * Prepared reuse tests
 * Bound reuse tests
 * Streaming/logical replication
+* Test different PG versions

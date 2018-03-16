@@ -124,6 +124,7 @@ public interface Converters {
       from.put(Circle.class.getName(), convertTextFromItem(Object::toString));
       from.put(Double.class.getName(), convertTextFromItem(Object::toString));
       from.put(Float.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Inet.class.getName(), convertTextFromItem(Object::toString));
       from.put(Integer.class.getName(), convertTextFromItem(Object::toString));
       from.put(Interval.class.getName(), convertTextFromItem(Object::toString));
       from.put(Line.class.getName(), convertTextFromItem(Object::toString));
@@ -132,6 +133,7 @@ public interface Converters {
       from.put(LocalDateTime.class.getName(), convertTextFromItem(TIMESTAMP_FORMAT::format));
       from.put(LocalTime.class.getName(), convertTextFromItem(DateTimeFormatter.ISO_LOCAL_TIME::format));
       from.put(Long.class.getName(), convertTextFromItem(Object::toString));
+      from.put(MacAddr.class.getName(), convertTextFromItem(Object::toString));
       from.put(Money.class.getName(), convertTextFromItem(Object::toString));
       from.put(OffsetDateTime.class.getName(), convertTextFromItem(TIMESTAMPTZ_FORMAT::format));
       from.put(OffsetTime.class.getName(), convertTextFromItem(TIMETZ_FORMAT::format));
@@ -140,6 +142,7 @@ public interface Converters {
       from.put(Polygon.class.getName(), convertTextFromItem(Object::toString));
       from.put(Short.class.getName(), convertTextFromItem(Object::toString));
       from.put(String.class.getName(), convertTextFromItem(Object::toString));
+      from.put(java.util.UUID.class.getName(), convertTextFromItem(Object::toString));
       FROM_CONVERTERS = Collections.unmodifiableMap(from);
 
       Map<String, Converters.To> to = new HashMap<>();
@@ -167,12 +170,13 @@ public interface Converters {
         return ByteBuffer.wrap(Util.hexToBytes(v.substring(2)));
       }, DataType.BYTEA));
       to.put(Character.class.getName(), convertTextToItem(v -> v == null || v.length() != 1 ? null : v.charAt(0),
-          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.CHAR));
+          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.CHAR, DataType.BIT));
       to.put(Circle.class.getName(), convertTextToItem(Circle::valueOf, DataType.CIRCLE));
       to.put(Double.class.getName(), convertTextToItem(Double::valueOf,
           DataType.INT2, DataType.INT4, DataType.INT8, DataType.NUMERIC, DataType.FLOAT4, DataType.FLOAT8));
       to.put(Float.class.getName(), convertTextToItem(Float::valueOf,
           DataType.INT2, DataType.INT4, DataType.INT8, DataType.NUMERIC, DataType.FLOAT4));
+      to.put(Inet.class.getName(), convertTextToItem(Inet::valueOf, DataType.CIDR, DataType.INET));
       to.put(Integer.class.getName(), convertTextToItem(Integer::valueOf, DataType.INT2, DataType.INT4));
       to.put(Interval.class.getName(), convertTextToItem(Interval::valueOf, DataType.INTERVAL));
       to.put(Line.class.getName(), convertTextToItem(Line::valueOf, DataType.LINE));
@@ -184,6 +188,7 @@ public interface Converters {
       to.put(LocalTime.class.getName(), convertTextToItem(v -> LocalTime.parse(v, DateTimeFormatter.ISO_LOCAL_TIME),
           DataType.TIME));
       to.put(Long.class.getName(), convertTextToItem(Long::valueOf, DataType.INT2, DataType.INT4, DataType.INT8));
+      to.put(MacAddr.class.getName(), convertTextToItem(MacAddr::valueOf, DataType.MACADDR, DataType.MACADDR8));
       to.put(Money.class.getName(), convertTextToItem(Money::valueOf, DataType.MONEY));
       to.put(OffsetDateTime.class.getName(), convertTextToItem(v -> OffsetDateTime.parse(v, TIMESTAMPTZ_FORMAT),
           DataType.TIMESTAMPTZ));
@@ -193,8 +198,9 @@ public interface Converters {
       to.put(Polygon.class.getName(), convertTextToItem(Polygon::valueOf, DataType.POLYGON));
       to.put(Short.class.getName(), convertTextToItem(Short::valueOf, DataType.INT2));
       to.put(String.class.getName(), convertTextToItem(Function.identity(),
-          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.NAME,
-          DataType.CHAR, DataType.UUID, DataType.JSON));
+          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.NAME, DataType.CHAR, DataType.UUID, DataType.JSON,
+          DataType.JSONB, DataType.BIT, DataType.VARBIT, DataType.CIDR, DataType.INET, DataType.XML));
+      to.put(java.util.UUID.class.getName(), convertTextToItem(java.util.UUID::fromString, DataType.UUID));
       TO_CONVERTERS = Collections.unmodifiableMap(to);
     }
 

@@ -8,12 +8,10 @@ import org.junit.runners.Parameterized;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.time.*;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -28,17 +26,10 @@ public class QueryTest extends DbTestBase {
       - test big integer w/ decimal
       - test errors
       - test types not the exact type expected
-      - test other oddities (e.g. +/- nan, +/- inf, etc)
-        - null chars
+      - test null chars
       - test alternative locales
       - internal types such as: "char", name
       - other types:
-        - network types
-        - bit string
-        - text search
-        - uuid
-        - xml
-        - json
         - composite types
         - ranges
         - oids
@@ -46,7 +37,7 @@ public class QueryTest extends DbTestBase {
   */
 
   @Parameterized.Parameters(name = "{0}")
-  public static List<TypeCheck> data() {
+  public static List<TypeCheck> data() throws Exception {
     List<TypeCheck> typeChecks = new ArrayList<>();
     // Regular types
     typeChecks.addAll(Arrays.asList(
@@ -97,7 +88,30 @@ public class QueryTest extends DbTestBase {
         TypeCheck.of("path", new Path(new Point[] { new Point(9, 10), new Point(10, 11) }, true),
             new Path(new Point[] { new Point(12, 13), new Point(14, 15) }, false), null),
         TypeCheck.of("polygon", new Polygon(new Point(16, 17), new Point(18, 19)), null),
-        TypeCheck.of("circle", new Circle(new Point(20, 21), 22), null)
+        TypeCheck.of("circle", new Circle(new Point(20, 21), 22), null),
+        TypeCheck.of("cidr", new Inet(InetAddress.getByName("192.168.100.128"), 25),
+            new Inet(InetAddress.getByName("2001:4f8:3:ba::"), 64), new Inet(InetAddress.getByName("192.168.100.128")),
+            new Inet(InetAddress.getByName("192.168.100.128"), 32), new Inet(InetAddress.getByName("2001:4f8:3:ba::")),
+            new Inet(InetAddress.getByName("2001:4f8:3:ba::"), 128), null),
+        TypeCheck.of("inet", new Inet(InetAddress.getByName("192.168.100.128"), 25),
+            new Inet(InetAddress.getByName("2001:4f8:3:ba::"), 64), new Inet(InetAddress.getByName("192.168.100.128")),
+            new Inet(InetAddress.getByName("192.168.100.128"), 32), new Inet(InetAddress.getByName("2001:4f8:3:ba::")),
+            new Inet(InetAddress.getByName("2001:4f8:3:ba::"), 128), null),
+        TypeCheck.of("macaddr", MacAddr.valueOf("08:00:2b:01:02:03"), null),
+        TypeCheck.of("macaddr8", MacAddr.valueOf("08:00:2b:01:02:03:04:05"), null),
+        TypeCheck.of("bit", '1', '0', null),
+        TypeCheck.of("bit(3)", "101", "010", null),
+        TypeCheck.of("bit varying(5)", "101", "010", null),
+        TypeCheck.of("uuid",
+            java.util.UUID.fromString("00000000-0000-0000-0000-000000000000"),
+            java.util.UUID.fromString("f47ac10b-58cc-1372-8567-0e02b2c3d479"),
+            java.util.UUID.fromString("f47ac10b-58cc-2372-8567-0e02b2c3d479"),
+            java.util.UUID.fromString("f47ac10b-58cc-3372-8567-0e02b2c3d479"),
+            java.util.UUID.fromString("f47ac10b-58cc-4372-8567-0e02b2c3d479"), null),
+        // TODO: alternate XML encodings?
+        TypeCheck.of("xml", "<foo>bar</foo>", null),
+        TypeCheck.of("json", "[\"foo\", {\"bar\": \"baz\"}, 17, null]", null),
+        TypeCheck.of("jsonb", "[\"foo\", {\"bar\": \"baz\"}, 17, null]", null)
     ));
     // Array versions
     List<TypeCheck> arrayTypeChecks = new ArrayList<>();
