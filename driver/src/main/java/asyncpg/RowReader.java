@@ -2,7 +2,6 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-import java.nio.CharBuffer;
 import java.util.*;
 
 public class RowReader {
@@ -41,14 +40,14 @@ public class RowReader {
     return row.raw[colIndex];
   }
 
-  public <@Nullable T> T get(QueryMessage.Row row, String colName, Class<T> typ) {
+  public <T> @Nullable T get(QueryMessage.Row row, String colName, Class<T> typ) {
     if (row.meta == null) throw new DriverException.MissingRowMeta();
     QueryMessage.RowMeta.Column col = row.meta.columnsByName.get(colName.toLowerCase());
     if (col == null) throw new DriverException.ColumnNotPresent("No column for name " + colName);
     return get(col, row.raw[col.index], typ);
   }
 
-  public <@Nullable T> T get(QueryMessage.Row row, int colIndex, Class<T> typ) {
+  public <T> @Nullable T get(QueryMessage.Row row, int colIndex, Class<T> typ) {
     if (colIndex < 0 || colIndex > row.raw.length)
       throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
     // No meta data means we use the unspecified type
@@ -59,14 +58,14 @@ public class RowReader {
   }
 
   @SuppressWarnings("unchecked")
-  protected <@Nullable T> Converters.@Nullable To<? extends T> getConverter(Class<T> typ) {
+  protected <T> Converters.@Nullable To<? extends T> getConverter(Class<T> typ) {
     Converters.To conv = converters.get(typ.getName());
     if (conv != null || typ.getSuperclass() == null) return conv;
     return (Converters.To<? extends T>) getConverter(typ.getSuperclass());
   }
 
   @SuppressWarnings("unchecked")
-  public <@Nullable T> T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
+  public <T> @Nullable T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
     Converters.To<? extends T> conv = getConverter(typ);
     if (conv == null) {
       // Handle as an array if necessary
@@ -74,6 +73,12 @@ public class RowReader {
         if (bytes == null) return null;
         try {
           return getArray(col, bytes, typ);
+        } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
+      }
+      if (Map.class.isAssignableFrom(typ)) {
+        if (bytes == null) return null;
+        try {
+          return (T) getHStore(col, bytes, String.class, String.class);
         } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
       }
       throw new DriverException.NoConversion(typ);
@@ -87,13 +92,14 @@ public class RowReader {
   }
 
   @SuppressWarnings("unchecked")
-  protected <@Nullable T> T getArray(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
+  protected <T> @Nullable T getArray(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
     Converters.BuiltIn.assertNotBinary(col.textFormat);
-    List<T> ret = new ArrayList<>();
     char[] chars = Util.charsFromBytes(bytes);
-    int index = readArray(col, chars, 0, ret, typ, getArrayDelimiter(typ));
-    if (index != chars.length - 1) throw new IllegalArgumentException("Unexpected chars after array end");
-    return (T) ret.toArray();
+    char delim = getArrayDelimiter(typ);
+    StreamingTextContext ctx = new StreamingTextContext(chars, new char[] { delim, '}' });
+    T ret = readArray(col, ctx, typ, delim);
+    if (ctx.index != chars.length - 1) throw new IllegalArgumentException("Unexpected chars after array end");
+    return ret;
   }
 
   @SuppressWarnings("unchecked")
@@ -104,61 +110,117 @@ public class RowReader {
     return ',';
   }
 
+  protected @Nullable String readCollectionItemText(StreamingTextContext ctx) {
+    if (ctx.chars[ctx.index] == '"') {
+      ctx.strBuf.setLength(0);
+      ctx.index++;
+      while (ctx.chars.length > ctx.index && ctx.chars[ctx.index] != '"') {
+        if (ctx.chars[ctx.index] == '\\') {
+          ctx.index++;
+          if (ctx.chars.length <= ctx.index) break;
+        }
+        ctx.strBuf.append(ctx.chars[ctx.index]);
+        ctx.index++;
+      }
+      if (ctx.chars.length <= ctx.index) throw new IllegalArgumentException("Unexpected end of quote string");
+      ctx.index++;
+      return ctx.strBuf.toString();
+    }
+    // Read until next end char
+    int startIndex = ctx.index;
+    while (ctx.chars.length > ctx.index && !ctx.isSubItemEndChar(ctx.chars[ctx.index])) ctx.index++;
+    String str = new String(Arrays.copyOfRange(ctx.chars, startIndex, ctx.index));
+    return str.equals("NULL") ? null : str;
+  }
+
   @SuppressWarnings("unchecked")
-  protected <@Nullable T> int readArray(QueryMessage.RowMeta.Column col, char[] chars,
-      int index, List<T> list, Class<T> typ, char delim) {
-    if (chars.length > index + 1 && chars[index] != '{')
+  protected <T> T readArray(QueryMessage.RowMeta.Column col, StreamingTextContext ctx, Class<T> typ, char delim) {
+    if (ctx.chars.length > ctx.index + 1 && ctx.chars[ctx.index] != '{')
       throw new IllegalArgumentException("Array must start with brace");
-    StringBuilder strBuf = new StringBuilder();
-    index++;
+    ctx.index++;
     QueryMessage.RowMeta.Column subCol = col.child(DataType.arrayComponentOid(col.dataTypeOid));
     // TODO: what if we don't want sub-arrays to be array types...we don't want to look ahead for the end though
     Class subType;
     if (typ == Object.class) subType = Object.class;
     else if (typ.isArray()) subType = typ.getComponentType();
     else throw new IllegalArgumentException("Found sub array but expected type is not object or array type");
-    while (chars.length > index && chars[index] != '}') {
-      // If we're not the first, expect a comma
+    List list = new ArrayList();
+    while (ctx.chars.length > ctx.index && ctx.chars[ctx.index] != '}') {
+      // If we're not the first, expect a delimiter
       if (!list.isEmpty()) {
-        if (chars[index] != delim) throw new IllegalArgumentException("Missing delimiter");
-        index++;
+        if (ctx.chars[ctx.index] != delim) throw new IllegalArgumentException("Missing delimiter");
+        ctx.index++;
       }
-      // Check null, or quoted string, or sub array, or just value
-      if (chars[index] == 'N' && chars.length > index + 4 && chars[index + 1] == 'U' &&
-          chars[index + 2] == 'L' && chars[index + 3] == 'L' &&
-          (chars[index + 4] == delim || chars[index + 4] == '}' || Character.isWhitespace(chars[index + 4]))) {
-        list.add(null);
-        index += 4;
-      } else if (chars[index] == '"') {
-        strBuf.setLength(0);
-        index++;
-        while (chars.length > index && chars[index] != '"') {
-          if (chars[index] == '\\') {
-            index++;
-            if (chars.length <= index) break;
-          }
-          strBuf.append(chars[index]);
-          index++;
-        }
-        if (chars.length <= index) throw new IllegalArgumentException("Unexpected end of quote string");
-        list.add((T) get(subCol, Util.bytesFromCharBuffer(CharBuffer.wrap(strBuf)), subType));
-        index++;
-      } else if (chars[index] == '{') {
-        List subList = new ArrayList();
-        index = readArray(col.child(DataType.UNSPECIFIED), chars, index, subList, subType, delim);
-        if (chars[index] != '}') throw new IllegalArgumentException("Unexpected array end");
-        index++;
-        list.add((T) subList.toArray());
+      if (ctx.chars[ctx.index] == '{') {
+        list.add(readArray(col.child(DataType.UNSPECIFIED), ctx, subType, delim));
+        if (ctx.chars[ctx.index] != '}') throw new IllegalArgumentException("Unexpected array end");
+        ctx.index++;
       } else {
-        // // Just run until the next delim or end brace
-        int startIndex = index;
-        while (chars.length > index && chars[index] != delim && chars[index] != '}') index++;
-        if (chars.length <= index) throw new IllegalArgumentException("Unexpected value end");
-        char[] subChars = Arrays.copyOfRange(chars, startIndex, index);
-        list.add((T) get(subCol, Util.bytesFromCharBuffer(CharBuffer.wrap(subChars)), subType));
+        String str = readCollectionItemText(ctx);
+        if (str == null) list.add(null);
+        else list.add(get(subCol, Util.bytesFromString(str), subType));
       }
     }
-    if (chars.length <= index) throw new IllegalArgumentException("Unexpected end");
-    return index;
+    if (ctx.chars.length <= ctx.index) throw new IllegalArgumentException("Unexpected end");
+    return (T) list.toArray();
+  }
+
+  @SuppressWarnings("unchecked")
+  protected <K, V> Map<K, @Nullable V> getHStore(QueryMessage.RowMeta.Column col, byte[] bytes,
+      Class<K> keyTyp, Class<V> valTyp) {
+    Converters.BuiltIn.assertNotBinary(col.textFormat);
+    char[] chars = Util.charsFromBytes(bytes);
+    StreamingTextContext ctx = new StreamingTextContext(chars, new char[] { ',', '=' });
+    return readHStore(col, ctx, keyTyp, valTyp);
+  }
+
+  @SuppressWarnings("unchecked")
+  protected <K, V> Map<K, @Nullable V> readHStore(QueryMessage.RowMeta.Column col, StreamingTextContext ctx,
+      Class<K> keyTyp, Class<V> valTyp) {
+    Map<K, @Nullable V> map = new HashMap<>();
+    QueryMessage.RowMeta.Column subCol = col.child(DataType.UNSPECIFIED);
+    while (ctx.chars.length > ctx.index) {
+      // If we're not the first, expect comma + space
+      if (!map.isEmpty()) {
+        if (ctx.index + 2 >= ctx.chars.length || ctx.chars[ctx.index] != ',' || ctx.chars[ctx.index + 1] != ' ')
+          throw new IllegalArgumentException("Missing delimiter");
+        ctx.index += 2;
+      }
+      // Read key
+      String keyStr = readCollectionItemText(ctx);
+      if (keyStr == null) throw new IllegalArgumentException("Unexpected null key");
+      if (ctx.index + 2 >= ctx.chars.length || ctx.chars[ctx.index] != '=' || ctx.chars[ctx.index + 1] != '>')
+        throw new IllegalArgumentException("Map key without value");
+      ctx.index += 2;
+      K key;
+      if (keyTyp == String.class || keyTyp == Object.class) key = (K) keyStr;
+      else key = get(subCol, Util.bytesFromString(keyStr), keyTyp);
+      if (key == null) throw new IllegalArgumentException("Unexpected null key");
+      // Read val
+      String valStr = readCollectionItemText(ctx);
+      V val;
+      if (valStr == null) val = null;
+      else if (valTyp == String.class || valTyp == Object.class) val = (V) valStr;
+      else val = get(subCol, Util.bytesFromString(valStr), valTyp);
+      map.put(key, val);
+    }
+    return map;
+  }
+
+  protected static class StreamingTextContext {
+    public final char[] chars;
+    public int index;
+    public final StringBuilder strBuf = new StringBuilder();
+    public final char[] subItemEndChars;
+
+    public StreamingTextContext(char[] chars, char[] subItemEndChars) {
+      this.chars = chars;
+      this.subItemEndChars = subItemEndChars;
+    }
+
+    public boolean isSubItemEndChar(char chr) {
+      for (char subItemEndChar : subItemEndChars) if (subItemEndChar == chr) return true;
+      return false;
+    }
   }
 }

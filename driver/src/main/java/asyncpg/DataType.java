@@ -148,6 +148,7 @@ public class DataType {
     map.put(MACADDR_ARRAY, "MACADDR_ARRAY");
     map.put(MACADDR8, "MACADDR8");
     map.put(MACADDR8_ARRAY, "MACADDR8_ARRAY");
+    map.put(MONEY, "MONEY");
     map.put(MONEY_ARRAY, "MONEY_ARRAY");
     map.put(NAME, "NAME");
     map.put(NAME_ARRAY, "NAME_ARRAY");

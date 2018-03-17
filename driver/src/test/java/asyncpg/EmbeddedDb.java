@@ -15,7 +15,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Level;
@@ -43,6 +45,7 @@ public interface EmbeddedDb {
     public Config dbConf;
     public List<String> additionalInitDbParams =
         Arrays.asList("-E", "SQL_ASCII", "--locale=C", "--lc-collate=C", "--lc-ctype=C");
+    public List<String> startupQueries = Collections.singletonList("CREATE EXTENSION hstore;");
 
     public EmbeddedDbConfig dbConf(Config dbConf) { this.dbConf = dbConf; return this; }
 
@@ -74,6 +77,17 @@ public interface EmbeddedDb {
         postgres.start(runtimeConfig, conf.dbConf.hostname, conf.dbConf.port, conf.dbConf.database,
             conf.dbConf.username, conf.dbConf.password, conf.additionalInitDbParams);
       } catch (IOException e) { throw new RuntimeException(e); }
+      // If there are startup queries, run those
+      if (!conf.startupQueries.isEmpty()) {
+        try (java.sql.Connection conn = newJdbcConnection()) {
+          try (Statement stmt = conn.createStatement()) {
+            for (String startupQuery : conf.startupQueries) {
+              log.log(Level.FINE, "Running startup query: {0}", startupQuery);
+              stmt.execute(startupQuery);
+            }
+          }
+        } catch (SQLException e) { throw new RuntimeException(e); }
+      }
     }
 
     @Override

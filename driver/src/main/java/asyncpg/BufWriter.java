@@ -23,7 +23,7 @@ public interface BufWriter {
     public ByteBuffer buf;
     protected int bufLastLengthBegin = -1;
     protected boolean escapeSingleQuote;
-    protected boolean escapeDoubleQuote;
+    protected int escapeDoubleQuoteDepth;
 
     public Simple(boolean directBuffer, int bufferStep) {
       this.directBuffer = directBuffer;
@@ -95,22 +95,21 @@ public interface BufWriter {
 
     @Override
     public SELF writeStringEscapeDoubleQuoteBegin() {
-      if (escapeDoubleQuote) throw new IllegalStateException("Already escaping double quote");
-      escapeDoubleQuote = true;
+      escapeDoubleQuoteDepth++;
       return (SELF) this;
     }
 
     @Override
     public SELF writeStringEscapeDoubleQuoteEnd() {
-      if (!escapeDoubleQuote) throw new IllegalStateException("Not escaping double quote");
-      escapeDoubleQuote = false;
+      if (escapeDoubleQuoteDepth == 0) throw new IllegalStateException("Not escaping double quote");
+      escapeDoubleQuoteDepth--;
       return (SELF) this;
     }
 
     @Override
     public SELF writeString(String str) {
       if (escapeSingleQuote) str = str.replace("'", "''");
-      if (escapeDoubleQuote) str = str.replace("\\", "\\\\").replace("\"", "\\\"");
+      if (escapeDoubleQuoteDepth > 0) str = str.replace("\\", "\\\\").replace("\"", "\\\"");
       ByteBuffer strBuf = Util.byteBufferFromString(str);
       writeEnsureCapacity(strBuf.limit()).put(strBuf);
       return (SELF) this;

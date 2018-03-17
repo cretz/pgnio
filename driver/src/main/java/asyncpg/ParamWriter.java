@@ -39,9 +39,13 @@ public class ParamWriter {
   @SuppressWarnings("unchecked")
   protected <@Nullable T> Converters.@Nullable From<? extends T> getConverter(Class<T> typ, boolean topLevel) {
     Converters.From conv = converters.get(typ.getName());
-    if (conv == null && typ.isArray()) {
-      Converters.From subConv = getConverter(typ.getComponentType(), false);
-      if (subConv != null) conv = new ArrayConverter(subConv, topLevel);
+    if (conv == null) {
+      if (typ.isArray()) {
+        Converters.From subConv = getConverter(typ.getComponentType(), false);
+        if (subConv != null) conv = new ArrayConverter(topLevel, subConv.arrayDelimiter());
+      } else if (Map.class.isAssignableFrom(typ)) {
+        conv = new HStoreConverter(topLevel);
+      }
     }
     if (conv != null || typ.getSuperclass() == null) return conv;
     return (Converters.From<? extends T>) getConverter(typ.getSuperclass(), topLevel);
@@ -67,45 +71,71 @@ public class ParamWriter {
     } catch (Exception e) { throw new DriverException.ConvertFromFailed(obj.getClass(), e); }
   }
 
-  public static class ArrayConverter implements Converters.From {
-    protected final Converters.From componentConverter;
-    protected final boolean topLevel;
+  @SuppressWarnings("unchecked")
+  protected void writeCollectionItemText(@Nullable Object obj, BufWriter buf) {
+    if (obj == null) {
+      buf.writeString("NULL");
+      return;
+    }
+    Converters.From conv = getConverter(obj.getClass(), false);
+    if (conv == null) throw new DriverException.NoConversion(obj.getClass());
+    boolean needsQuote = conv.mustBeQuotedWhenUsedInSql(obj);
+    if (needsQuote) buf.writeString("\"").writeStringEscapeDoubleQuoteBegin();
+    try {
+      conv.convertFrom(true, obj, buf);
+    } finally {
+      if (needsQuote) buf.writeStringEscapeDoubleQuoteEnd();
+    }
+    if (needsQuote) buf.writeString("\"");
+  }
 
-    public ArrayConverter(Converters.From componentConverter, boolean topLevel) {
-      this.componentConverter = componentConverter;
+  public class ArrayConverter implements Converters.From {
+    protected final boolean topLevel;
+    protected final char arrayDelimiter;
+
+    public ArrayConverter(boolean topLevel, char arrayDelimiter) {
       this.topLevel = topLevel;
+      this.arrayDelimiter = arrayDelimiter;
     }
 
     @Override
-    public char arrayDelimiter() { return componentConverter.arrayDelimiter(); }
+    public char arrayDelimiter() { return arrayDelimiter; }
 
     @Override
     public boolean mustBeQuotedWhenUsedInSql(Object obj) { return topLevel; }
 
     @Override
-    @SuppressWarnings("unchecked")
     public void convertFrom(boolean textFormat, Object obj, BufWriter buf) {
       Converters.BuiltIn.assertNotBinary(textFormat);
       buf.writeByte((byte) '{');
       int length = Array.getLength(obj);
-      byte delim = (byte) componentConverter.arrayDelimiter();
       for (int i = 0; i < length; i++) {
-        if (i > 0) buf.writeByte(delim);
-        Object subObj = Array.get(obj, i);
-        if (subObj == null) {
-          buf.writeString("NULL");
-        } else {
-          boolean needsQuote = componentConverter.mustBeQuotedWhenUsedInSql(subObj);
-          if (needsQuote) buf.writeByte((byte) '"').writeStringEscapeDoubleQuoteBegin();
-          try {
-            componentConverter.convertFrom(textFormat, subObj, buf);
-          } finally {
-            if (needsQuote) buf.writeStringEscapeDoubleQuoteEnd();
-          }
-          if (needsQuote) buf.writeByte((byte) '"');
-        }
+        if (i > 0) buf.writeByte((byte) arrayDelimiter);
+        writeCollectionItemText(Array.get(obj, i), buf);
       }
       buf.writeByte((byte) '}');
+    }
+  }
+
+  public class HStoreConverter implements Converters.From<Map<?, ?>> {
+    protected final boolean topLevel;
+
+    public HStoreConverter(boolean topLevel) { this.topLevel = topLevel; }
+
+    @Override
+    public boolean mustBeQuotedWhenUsedInSql(Map obj) { return true; }
+
+    @Override
+    public void convertFrom(boolean textFormat, Map<?, ?> obj, BufWriter buf) {
+      Converters.BuiltIn.assertNotBinary(textFormat);
+      boolean first = true;
+      for (Map.Entry<?, ?> entry : obj.entrySet()) {
+        if (first) first = false;
+        else buf.writeByte((byte) ',');
+        writeCollectionItemText(entry.getKey(), buf);
+        buf.writeString("=>");
+        writeCollectionItemText(entry.getValue(), buf);
+      }
     }
   }
 }

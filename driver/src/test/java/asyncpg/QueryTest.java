@@ -33,7 +33,6 @@ public class QueryTest extends DbTestBase {
         - composite types
         - ranges
         - oids
-        - hstore
   */
 
   @Parameterized.Parameters(name = "{0}")
@@ -111,7 +110,8 @@ public class QueryTest extends DbTestBase {
         // TODO: alternate XML encodings?
         TypeCheck.of("xml", "<foo>bar</foo>", null),
         TypeCheck.of("json", "[\"foo\", {\"bar\": \"baz\"}, 17, null]", null),
-        TypeCheck.of("jsonb", "[\"foo\", {\"bar\": \"baz\"}, 17, null]", null)
+        TypeCheck.of("jsonb", "[\"foo\", {\"bar\": \"baz\"}, 17, null]", null),
+        TypeCheck.of("hstore", testMap1(), null)
     ));
     // Array versions
     List<TypeCheck> arrayTypeChecks = new ArrayList<>();
@@ -130,6 +130,13 @@ public class QueryTest extends DbTestBase {
     }
     typeChecks.addAll(arrayTypeChecks);
     return typeChecks;
+  }
+
+  protected static Map<String, String> testMap1() {
+    Map<String, String> ret = new HashMap<>();
+    ret.put("foo", "bar");
+    ret.put("baz", null);
+    return ret;
   }
 
   @Parameterized.Parameter
