@@ -134,13 +134,17 @@ public abstract class QueryBuildConnection
     public CompletableFuture<Prepared<T>> closeStatement() {
       return sendClose(false, statementName).thenApply(__ -> this);
     }
+
+    public CompletableFuture<Bound<T>> reuseBound(String portalName) {
+      return CompletableFuture.completedFuture(new Bound<>(ctx, prevConn, this, portalName));
+    }
   }
 
   public static class Bound<T extends QueryReadyConnection<T>> extends QueryBuildConnection<T, Bound<T>> {
-    protected final @Nullable Prepared<T> prepared;
+    protected final Prepared<T> prepared;
     public final String portalName;
 
-    protected Bound(Context ctx, T prevConn, @Nullable Prepared<T> prepared, String portalName) {
+    protected Bound(Context ctx, T prevConn, Prepared<T> prepared, String portalName) {
       super(ctx, prevConn);
       this.prepared = prepared;
       this.portalName = portalName;

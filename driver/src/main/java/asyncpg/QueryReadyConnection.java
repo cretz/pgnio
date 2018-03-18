@@ -89,6 +89,14 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
     return preparedQuery(query, params).thenCompose(QueryResultConnection::done);
   }
 
+  public CompletableFuture<QueryResultConnection.Copy<SELF>> simpleCopyIn(String query) {
+    return simpleQuery(query).thenCompose(QueryResultConnection::copyIn);
+  }
+
+  public CompletableFuture<QueryResultConnection.Copy<SELF>> simpleCopyOut(String query) {
+    return simpleQuery(query).thenCompose(QueryResultConnection::copyOut);
+  }
+
   public enum TransactionStatus { IDLE, IN_TRANSACTION, FAILED_TRANSACTION }
 
   public abstract CompletableFuture<InTransaction<SELF>> beginTransaction();
@@ -141,13 +149,6 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
         conn.prevConn.invalid = false;
         return conn.prevConn;
       });
-    }
-
-    @SuppressWarnings("unchecked")
-    public CompletableFuture<QueryBuildConnection.Bound<InTransaction<T>>> reuseBound(String portalName) {
-      assertValid();
-      invalid = true;
-      return CompletableFuture.completedFuture(new QueryBuildConnection.Bound(ctx, this, null, portalName));
     }
   }
 }

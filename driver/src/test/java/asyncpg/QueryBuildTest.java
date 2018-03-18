@@ -8,7 +8,7 @@ public class QueryBuildTest extends DbTestBase {
   @Test
   public void testMultipleBind() {
     withConnectionSync(c ->
-        c.simpleQueryExec("CREATE TABLE testMultipleBind (bar VARCHAR(255))").
+        c.simpleQueryExec("CREATE TABLE testMultipleBind (foo VARCHAR(255))").
             thenCompose(conn -> conn.prepare("INSERT INTO testMultipleBind VALUES ($1)")).
                 thenCompose(pConn -> pConn.bindExecuteAndBack("test1")).
                 thenCompose(pConn -> pConn.bindExecuteAndDone("test2")).
@@ -28,7 +28,7 @@ public class QueryBuildTest extends DbTestBase {
   @Test
   public void testReusePrepared() {
     withConnectionSync(c ->
-        c.simpleQueryExec("CREATE TABLE testReusePrepared (bar VARCHAR(255))").
+        c.simpleQueryExec("CREATE TABLE testReusePrepared (foo VARCHAR(255))").
             thenCompose(conn ->
                 conn.prepareReusable("testReusePrepared-query", "INSERT INTO testReusePrepared VALUES ($1)")).
             thenCompose(pConn -> pConn.done()).
@@ -39,16 +39,39 @@ public class QueryBuildTest extends DbTestBase {
                     thenApply(__ -> conn)).
             thenCompose(conn -> conn.reusePrepared("testReusePrepared-query")).
             thenCompose(pConn -> pConn.bindExecuteAndDone("test1")).
-            thenCompose(rConn ->
-                rConn.collectRowCount().
-                    thenAccept(count -> Assert.assertEquals(1L, count.longValue())).
-                    thenCompose(__ -> rConn.done())).
+            thenCompose(rConn -> rConn.done()).
+            thenCompose(conn ->
+                conn.simpleQueryRows("SELECT * FROM testReusePrepared").
+                    thenAccept(rows -> Assert.assertEquals(1, rows.size())).
+                    thenApply(__ -> conn)).
             thenCompose(conn -> conn.simpleQueryExec("DROP TABLE testReusePrepared"))
     );
   }
 
   @Test
   public void testReuseBound() {
-    // TODO: name a bound, do something in between, then reuse it
+    withConnectionSync(c ->
+        c.simpleQueryExec("CREATE TABLE testReuseBound (foo VARCHAR(255))").
+            thenCompose(conn -> conn.beginTransaction()).
+            thenCompose(conn ->
+                conn.prepareReusable("testReuseBound-query", "INSERT INTO testReuseBound VALUES ($1)")).
+            thenCompose(pConn -> pConn.bindReusable("testReuseBound-bound", "test")).
+            thenCompose(bConn -> bConn.done()).
+            thenCompose(rConn -> rConn.done()).
+            thenCompose(conn ->
+                conn.simpleQueryRows("SELECT * FROM testReuseBound").
+                    thenAccept(rows -> Assert.assertEquals(0, rows.size())).
+                    thenApply(__ -> conn)).
+            thenCompose(conn -> conn.reusePrepared("testReuseBound-query")).
+            thenCompose(pConn -> pConn.reuseBound("testReuseBound-bound")).
+            thenCompose(bConn -> bConn.executeAndDone()).
+            thenCompose(rConn -> rConn.done()).
+            thenCompose(conn -> conn.commitTransaction()).
+            thenCompose(conn ->
+                conn.simpleQueryRows("SELECT * FROM testReuseBound").
+                    thenAccept(rows -> Assert.assertEquals(1, rows.size())).
+                    thenApply(__ -> conn)).
+            thenCompose(conn -> conn.simpleQueryExec("DROP TABLE testReuseBound"))
+    );
   }
 }

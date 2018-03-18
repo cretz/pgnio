@@ -193,6 +193,52 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return next(QueryMessage.Complete.class).thenApply(complete -> complete == null ? null : complete.getRowCount());
   }
 
+  public CompletableFuture<T> done() {
+    if (!willEndWithDone) return CompletableFuture.completedFuture(prevConn);
+    // Consume all until done
+    return next(__ -> false).thenApply(__ -> {
+      prevConn.invalid = false;
+      return prevConn;
+    });
+  }
+
+  public CompletableFuture<List<QueryMessage.Row>> collectRowsAndDone() {
+    return collectRows().thenCompose(rows -> done().thenApply(__ -> rows));
+  }
+
+  @SuppressWarnings("return.type.incompatible")
+  public CompletableFuture<@Nullable Long> collectRowCountAndDone() {
+    return collectRowCount().thenCompose(rowCount -> done().thenApply(__ -> rowCount));
+  }
+
+  public CompletableFuture<Copy<T>> copyIn() { return copyIn(true); }
+  public CompletableFuture<Copy<T>> copyIn(boolean waitForBegin) {
+    return copy(QueryMessage.CopyBegin.Direction.IN, waitForBegin);
+  }
+
+  public CompletableFuture<Copy<T>> copyOut() { return copyOut(true); }
+  public CompletableFuture<Copy<T>> copyOut(boolean waitForBegin) {
+    return copy(QueryMessage.CopyBegin.Direction.OUT, waitForBegin);
+  }
+
+  public CompletableFuture<Copy<T>> copyBoth() { return copyBoth(true); }
+  public CompletableFuture<Copy<T>> copyBoth(boolean waitForBegin) {
+    return copy(QueryMessage.CopyBegin.Direction.BOTH, waitForBegin);
+  }
+
+  public CompletableFuture<Copy<T>> copy(QueryMessage.CopyBegin.Direction direction, boolean waitForBegin) {
+    CompletableFuture<Void> ready =
+        !waitForBegin ? CompletableFuture.completedFuture(null) : next(QueryMessage.CopyBegin.class).thenApply(msg -> {
+          if (msg == null) throw new IllegalStateException("Expected copy begin, but never came");
+          if (msg.direction != direction)
+            throw new IllegalStateException("Expected copy " + direction + " got copy " + msg.direction);
+          return null;
+        });
+    return ready.thenApply(__ ->
+        new Copy<>(ctx, this,
+            direction != QueryMessage.CopyBegin.Direction.OUT, direction != QueryMessage.CopyBegin.Direction.IN));
+  }
+
   protected CompletableFuture<Void> sendCopyData(byte[] data) {
     ctx.buf.clear();
     ctx.writeByte((byte) 'd').writeLengthIntBegin().writeBytes(data).writeLengthIntEnd();
@@ -222,23 +268,102 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return writeFrontendMessage();
   }
 
-  public CompletableFuture<Void> copyInFailed(String message) { return sendCopyFail(message); }
+  public CompletableFuture<Void> copyInFail(String message) { return sendCopyFail(message); }
 
-  public CompletableFuture<T> done() {
-    if (!willEndWithDone) return CompletableFuture.completedFuture(prevConn);
-    // Consume all until done
-    return next(__ -> false).thenApply(__ -> {
-      prevConn.invalid = false;
-      return prevConn;
-    });
-  }
+  public static class Copy<T extends Connection.Started> extends Connection.Started {
+    protected final QueryResultConnection<T> prevConn;
+    public final boolean copyIn;
+    public final boolean copyOut;
+    protected boolean copyInComplete;
+    protected boolean copyOutComplete;
 
-  public CompletableFuture<List<QueryMessage.Row>> collectRowsAndDone() {
-    return collectRows().thenCompose(rows -> done().thenApply(__ -> rows));
-  }
+    protected Copy(Context ctx, QueryResultConnection<T> prevConn, boolean copyIn, boolean copyOut) {
+      super(ctx);
+      this.prevConn = prevConn;
+      this.copyIn = copyIn;
+      this.copyOut = copyOut;
+    }
 
-  @SuppressWarnings("return.type.incompatible")
-  public CompletableFuture<@Nullable Long> collectRowCountAndDone() {
-    return collectRowCount().thenCompose(rowCount -> done().thenApply(__ -> rowCount));
+    protected void assertCopyIn() { if (!copyIn) throw new IllegalStateException("Not in copy-in mode"); }
+
+    public boolean isCopyInComplete() {
+      assertCopyIn();
+      return copyInComplete;
+    }
+
+    protected void assertNotCopyInComplete() {
+      if (isCopyInComplete()) throw new IllegalStateException("Copy-in already completed");
+    }
+
+    public CompletableFuture<Copy<T>> sendData(byte[] bytes) {
+      assertNotCopyInComplete();
+      return prevConn.copyInWrite(bytes).thenApply(__ -> this);
+    }
+
+    public CompletableFuture<Copy<T>> sendFail(String message) {
+      assertNotCopyInComplete();
+      return prevConn.copyInFail(message).thenApply(__ -> {
+        copyInComplete = true;
+        return this;
+      });
+    }
+
+    public CompletableFuture<Copy<T>> sendComplete() {
+      assertNotCopyInComplete();
+      return prevConn.copyInComplete().thenApply(__ -> {
+        copyInComplete = true;
+        return this;
+      });
+    }
+
+    protected void assertCopyOut() { if (!copyOut) throw new IllegalStateException("Not in copy-out mode"); }
+
+    public boolean isCopyOutComplete() {
+      assertCopyOut();
+      return copyOutComplete;
+    }
+
+    // Returns null if done
+    public CompletableFuture<byte@Nullable []> receiveData() {
+      if (isCopyOutComplete()) return CompletableFuture.completedFuture(null);
+      return prevConn.next(msg -> msg instanceof QueryMessage.CopyData || msg instanceof QueryMessage.CopyDone).
+          thenApply(msg -> {
+            if (msg instanceof QueryMessage.CopyData) return ((QueryMessage.CopyData) msg).bytes;
+            copyOutComplete = true;
+            return null;
+          });
+    }
+
+    public CompletableFuture<Void> receiveEachData(Consumer<byte[]> fn) {
+      return receiveEachDataAsync(data -> {
+        fn.accept(data);
+        return CompletableFuture.completedFuture(null);
+      });
+    }
+
+    public CompletableFuture<Void> receiveEachDataAsync(Function<byte[], CompletableFuture<Void>> fn) {
+      return receiveData().thenCompose(data -> {
+        if (data == null) return CompletableFuture.completedFuture(null);
+        return fn.apply(data).thenCompose(__ -> receiveEachDataAsync(fn));
+      });
+    }
+
+    public CompletableFuture<Copy<T>> receiveIgnoreUntilComplete() {
+      if (isCopyOutComplete()) return CompletableFuture.completedFuture(this);
+      return receiveData().thenCompose(data ->
+          data == null ? CompletableFuture.completedFuture(this) : receiveIgnoreUntilComplete());
+    }
+
+    public CompletableFuture<QueryResultConnection<T>> complete() {
+      // Send my complete if not sent
+      CompletableFuture<Copy<T>> sentComplete =
+          copyIn && !copyInComplete ? sendComplete() : CompletableFuture.completedFuture(this);
+      return sentComplete.thenCompose(copy -> {
+        if (!copyOut) return CompletableFuture.completedFuture(this);
+        return receiveIgnoreUntilComplete();
+      }).thenApply(copy -> copy.prevConn);
+    }
+
+    public CompletableFuture<T> done() { return complete().thenCompose(QueryResultConnection::done); }
   }
 }
