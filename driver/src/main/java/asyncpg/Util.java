@@ -161,5 +161,23 @@ public class Util {
     throw new IllegalArgumentException("Unrecognized primitive class: " + primitive);
   }
 
+  public static Class arrayClassOf(Class componentType) {
+    if (componentType == boolean.class) return boolean[].class;
+    if (componentType == byte.class) return byte[].class;
+    if (componentType == char.class) return char[].class;
+    if (componentType == double.class) return double[].class;
+    if (componentType == float.class) return float[].class;
+    if (componentType == int.class) return int[].class;
+    if (componentType == long.class) return long[].class;
+    if (componentType == short.class) return short[].class;
+    ClassLoader cl = componentType.getClassLoader();
+    String name;
+    if (componentType.isArray()) name = "[" + componentType.getName();
+    else name = "[L" + componentType.getName() + ";";
+    try {
+      return cl != null ? cl.loadClass(name) : Class.forName(name);
+    } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
+  }
+
   private Util() { }
 }

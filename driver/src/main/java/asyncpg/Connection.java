@@ -355,7 +355,8 @@ public abstract class Connection implements AutoCloseable {
     }
 
     protected void assertValid() {
-      if (invalid) throw new IllegalStateException("Not ready for queries");
+      if (invalid) throw new IllegalStateException(
+          "Attempting to reuse a connection in an invalid state. Did you forget a 'done' somewhere?");
     }
   }
 }

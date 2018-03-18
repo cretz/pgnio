@@ -70,13 +70,11 @@ public class RowReader {
     if (conv == null) {
       // Handle as an array if necessary
       if (typ.isArray()) {
-        if (bytes == null) return null;
         try {
           return getArray(col, bytes, typ);
         } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
       }
       if (Map.class.isAssignableFrom(typ)) {
-        if (bytes == null) return null;
         try {
           return (T) getHStore(col, bytes, String.class, String.class);
         } catch (Exception e) { throw new DriverException.ConvertToFailed(typ, col.dataTypeOid, e); }
@@ -91,8 +89,15 @@ public class RowReader {
     return ret;
   }
 
+  // Creates a fake column of unspecified type
+  public <T> @Nullable T get(@Nullable String val, Class<T> typ) {
+    return get(new QueryMessage.RowMeta.Column(0, "", 0, (short) 0, DataType.UNSPECIFIED, (short) 0, 0, true),
+        val == null ? null : Util.bytesFromString(val), typ);
+  }
+
   @SuppressWarnings("unchecked")
-  protected <T> @Nullable T getArray(QueryMessage.RowMeta.Column col, byte[] bytes, Class<T> typ) {
+  public <T> @Nullable T getArray(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
+    if (bytes == null) return null;
     Converters.BuiltIn.assertNotBinary(col.textFormat);
     char[] chars = Util.charsFromBytes(bytes);
     char delim = getArrayDelimiter(typ);
@@ -166,8 +171,9 @@ public class RowReader {
   }
 
   @SuppressWarnings("unchecked")
-  protected <K, V> Map<K, @Nullable V> getHStore(QueryMessage.RowMeta.Column col, byte[] bytes,
+  public <K, V> @Nullable Map<K, @Nullable V> getHStore(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes,
       Class<K> keyTyp, Class<V> valTyp) {
+    if (bytes == null) return null;
     Converters.BuiltIn.assertNotBinary(col.textFormat);
     char[] chars = Util.charsFromBytes(bytes);
     StreamingTextContext ctx = new StreamingTextContext(chars, new char[] { ',', '=' });

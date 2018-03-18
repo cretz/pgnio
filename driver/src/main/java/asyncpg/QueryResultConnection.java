@@ -35,7 +35,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     ctx.buf.position(5);
     switch (typ) {
       // TODO: make some of these enums, only put query counters on the ones that need it
-      // CloseComplete
+      // ParseComplete
       case '1':
         return new QueryMessage.ParseComplete(queryCounter);
       // BindComplete

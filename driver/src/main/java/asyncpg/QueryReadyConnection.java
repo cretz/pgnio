@@ -59,20 +59,22 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
   public CompletableFuture<QueryBuildConnection.Prepared<SELF>> prepareReusable(String statementName,
       String query, int... parameterDataTypes) {
     assertValid();
+    invalid = true;
     log.log(Level.FINE, "Preparing query: {0}", query);
     return sendParse(statementName, query, parameterDataTypes).
         thenApply(__ -> new QueryBuildConnection.Prepared<>(ctx, (SELF) this, statementName));
   }
 
-  public CompletableFuture<QueryResultConnection<SELF>> preparedQuery(String query, Object... params) {
-    return prepare(query).
-        thenCompose(QueryBuildConnection.Prepared::describeStatement).
-        thenCompose(prepared -> prepared.bind(params)).
-        thenCompose(QueryBuildConnection.Bound::execute).
-        thenCompose(QueryBuildConnection::done);
+  @SuppressWarnings("unchecked")
+  public CompletableFuture<QueryBuildConnection.Prepared<SELF>> reusePrepared(String statementName) {
+    assertValid();
+    invalid = true;
+    return CompletableFuture.completedFuture(new QueryBuildConnection.Prepared<>(ctx, (SELF) this, statementName));
   }
 
-  // TODO: preparedReusableQuery, reusePrepare, reusePrepared, reusePreparedQuery
+  public CompletableFuture<QueryResultConnection<SELF>> preparedQuery(String query, Object... params) {
+    return prepare(query).thenCompose(p -> p.describeBindExecuteAndDone(params));
+  }
 
   public CompletableFuture<List<QueryMessage.Row>> preparedQueryRows(String query, Object... params) {
     return preparedQuery(query, params).thenCompose(QueryResultConnection::collectRowsAndDone);
@@ -89,32 +91,63 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
 
   public enum TransactionStatus { IDLE, IN_TRANSACTION, FAILED_TRANSACTION }
 
+  public abstract CompletableFuture<InTransaction<SELF>> beginTransaction();
+
   public static class AutoCommit extends QueryReadyConnection<AutoCommit> {
     protected AutoCommit(Context ctx) { super(ctx); }
 
-    public CompletableFuture<InTransaction> beginTransaction() {
+    @Override
+    public CompletableFuture<InTransaction<AutoCommit>> beginTransaction() {
       assertValid();
-      throw new UnsupportedOperationException();
+      return simpleQueryExec("BEGIN").thenApply(conn -> {
+        conn.invalid = true;
+        return new InTransaction<>(ctx, 0, conn);
+      });
     }
   }
 
-  public static class InTransaction extends QueryReadyConnection<InTransaction> {
-    protected InTransaction(Context ctx) { super(ctx); }
+  public static class InTransaction<T extends QueryReadyConnection<T>> extends QueryReadyConnection<InTransaction<T>> {
+    protected final int depth;
+    protected final T prevConn;
 
-    public CompletableFuture<AutoCommit> commitTransaction() {
-      assertValid();
-      throw new UnsupportedOperationException();
+    protected InTransaction(Context ctx, int depth, T prevConn) {
+      super(ctx);
+      this.depth = depth;
+      this.prevConn = prevConn;
     }
 
-    public CompletableFuture<AutoCommit> rollbackTransaction() {
+    @Override
+    public CompletableFuture<InTransaction<InTransaction<T>>> beginTransaction() {
       assertValid();
-      throw new UnsupportedOperationException();
+      return simpleQueryExec("SAVEPOINT asyncpg_sp_" + (depth + 1)).thenApply(conn -> {
+        conn.invalid = true;
+        return new InTransaction<>(ctx, depth + 1, conn);
+      });
     }
 
-    // TODO: reuseBound
-//    public CompletableFuture<BoundConnection.Reusable> reuseBound(NamedBound bound) {
-//      assertValid();
-//      throw new UnsupportedOperationException();
-//    }
+    public CompletableFuture<T> commitTransaction() {
+      assertValid();
+      String query = depth == 0 ? "COMMIT" : "RELEASE SAVEPOINT asyncpg_sp_" + depth;
+      return simpleQueryExec(query).thenApply(conn -> {
+        conn.prevConn.invalid = false;
+        return conn.prevConn;
+      });
+    }
+
+    public CompletableFuture<T> rollbackTransaction() {
+      assertValid();
+      String query = depth == 0 ? "ROLLBACK" : "ROLLBACK TO SAVEPOINT asyncpg_sp_" + depth;
+      return simpleQueryExec(query).thenApply(conn -> {
+        conn.prevConn.invalid = false;
+        return conn.prevConn;
+      });
+    }
+
+    @SuppressWarnings("unchecked")
+    public CompletableFuture<QueryBuildConnection.Bound<InTransaction<T>>> reuseBound(String portalName) {
+      assertValid();
+      invalid = true;
+      return CompletableFuture.completedFuture(new QueryBuildConnection.Bound(ctx, this, null, portalName));
+    }
   }
 }

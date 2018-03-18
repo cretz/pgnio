@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.concurrent.CompletableFuture;
 
 public abstract class QueryBuildConnection
@@ -60,6 +62,10 @@ public abstract class QueryBuildConnection
       this.statementName = statementName;
     }
 
+    public CompletableFuture<Bound<T>> describeAndBind(Object... params) {
+      return describeStatement().thenCompose(c -> c.bind(params));
+    }
+
     public CompletableFuture<Bound<T>> bind(Object... params) {
       return bindReusable("", params);
     }
@@ -109,6 +115,18 @@ public abstract class QueryBuildConnection
       return writeFrontendMessage();
     }
 
+    public CompletableFuture<QueryResultConnection<T>> bindExecuteAndDone(Object... params) {
+      return bind(params).thenCompose(Bound::executeAndDone);
+    }
+
+    public CompletableFuture<QueryResultConnection<T>> describeBindExecuteAndDone(Object... params) {
+      return describeAndBind(params).thenCompose(Bound::executeAndDone);
+    }
+
+    public CompletableFuture<Prepared<T>> bindExecuteAndBack(Object... params) {
+      return bind(params).thenCompose(Bound::executeAndBack);
+    }
+
     public CompletableFuture<Prepared<T>> describeStatement() {
       return sendDescribe(false, statementName).thenApply(__ -> this);
     }
@@ -119,10 +137,10 @@ public abstract class QueryBuildConnection
   }
 
   public static class Bound<T extends QueryReadyConnection<T>> extends QueryBuildConnection<T, Bound<T>> {
-    protected final Prepared<T> prepared;
+    protected final @Nullable Prepared<T> prepared;
     public final String portalName;
 
-    protected Bound(Context ctx, T prevConn, Prepared<T> prepared, String portalName) {
+    protected Bound(Context ctx, T prevConn, @Nullable Prepared<T> prepared, String portalName) {
       super(ctx, prevConn);
       this.prepared = prepared;
       this.portalName = portalName;
@@ -142,7 +160,16 @@ public abstract class QueryBuildConnection
     }
 
     public CompletableFuture<Prepared<T>> back() {
+      if (prepared == null) throw new IllegalStateException("This was not built from a prepared statement");
       return CompletableFuture.completedFuture(prepared);
+    }
+
+    public CompletableFuture<Prepared<T>> executeAndBack() {
+      return execute().thenCompose(Bound::back);
+    }
+
+    public CompletableFuture<QueryResultConnection<T>> executeAndDone() {
+      return execute().thenCompose(Bound::done);
     }
 
     public CompletableFuture<Bound<T>> describePortal() {
