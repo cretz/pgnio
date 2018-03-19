@@ -1,5 +1,7 @@
 package asyncpg;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
+
 import java.util.concurrent.CompletableFuture;
 
 /** Base connection state for advanced query building using prepared and bound statements */
@@ -86,7 +88,8 @@ public abstract class QueryBuildConnection
 
     /**
      * Bind the given params to the statement using the configured {@link ParamWriter} and store the binding as a portal
-     * name. The binding can be reused later in the same transaction via {@link #reuseBound(String)}. This defers to
+     * name. The binding can be reused later in the same transaction via
+     * {@link QueryReadyConnection.InTransaction#reuseBound(String)}. This defers to
      * {@link #bindReusableEx(String, boolean[], boolean[], Object...)}.
      */
     public CompletableFuture<Bound<T>> bindReusable(String portalName, Object... params) {
@@ -171,20 +174,15 @@ public abstract class QueryBuildConnection
     public CompletableFuture<Prepared<T>> closeStatement() {
       return sendClose(false, statementName).thenApply(__ -> this);
     }
-
-    /** Reuse an existing bound portal name from the same transaction */
-    public CompletableFuture<Bound<T>> reuseBound(String portalName) {
-      return CompletableFuture.completedFuture(new Bound<>(ctx, prevConn, this, portalName));
-    }
   }
 
   /** Connection state once a statement has been bound with parameters */
   public static class Bound<T extends QueryReadyConnection<T>> extends QueryBuildConnection<T, Bound<T>> {
-    protected final Prepared<T> prepared;
+    protected final @Nullable Prepared<T> prepared;
     /** The bound portal name or empty string for non-reusable, unnamed bound portal */
     public final String portalName;
 
-    protected Bound(Context ctx, T prevConn, Prepared<T> prepared, String portalName) {
+    protected Bound(Context ctx, T prevConn, @Nullable Prepared<T> prepared, String portalName) {
       super(ctx, prevConn);
       this.prepared = prepared;
       this.portalName = portalName;
@@ -207,8 +205,15 @@ public abstract class QueryBuildConnection
      */
     public CompletableFuture<Bound<T>> execute(int maxRows) { return sendExecute(maxRows).thenApply(__ -> this); }
 
-    /** Without executing anything further, go back to the prepared statement. */
-    public CompletableFuture<Prepared<T>> back() { return CompletableFuture.completedFuture(prepared); }
+    /**
+     * Without executing anything further, go back to the prepared statement. Fails if this was created via
+     * {@link QueryReadyConnection.InTransaction#reuseBound(String)}.
+     */
+    public CompletableFuture<Prepared<T>> back() {
+      if (prepared == null)
+        throw new IllegalStateException("Bound portal is being reused and not part of prepared statement");
+      return CompletableFuture.completedFuture(prepared);
+    }
 
     /** {@link #execute()} + {@link #back()} */
     public CompletableFuture<Prepared<T>> executeAndBack() { return execute().thenCompose(Bound::back); }

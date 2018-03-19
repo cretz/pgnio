@@ -181,6 +181,11 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
       });
     }
 
+    /** Reuse a named bound portal created via {@link QueryBuildConnection.Prepared#bindReusable(String, Object...)} */
+    public CompletableFuture<QueryBuildConnection.Bound<InTransaction<T>>> reuseBound(String portalName) {
+      return CompletableFuture.completedFuture(new QueryBuildConnection.Bound<>(ctx, this, null, portalName));
+    }
+
     @Override
     protected CompletableFuture<AutoCommit> reset() { return rollbackTransaction().thenCompose(Started::reset); }
   }

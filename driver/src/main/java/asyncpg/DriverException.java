@@ -32,7 +32,8 @@ public abstract class DriverException extends RuntimeException {
   /** Thrown when {@link RowReader} needs row metadata but it is not available */
   public static class MissingRowMeta extends DriverException {
     public MissingRowMeta() {
-      super("Row meta data required but is missing. Usually caused by doing an advanced prepare w/out a describe.");
+      super("Row meta data required but is missing. " +
+          "Usually caused by doing an advanced bound execute w/out a describe first.");
     }
   }
 

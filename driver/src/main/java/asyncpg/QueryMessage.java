@@ -27,7 +27,7 @@ public abstract class QueryMessage {
     public PortalSuspended(int queryIndex) { super(queryIndex); }
 
     @Override
-    protected boolean isQueryingDoneMessage() { return true; }
+    protected boolean isQueryEndingMessage() { return true; }
   }
 
   /** Send as the final statement after simple or prepared queries have all completed */

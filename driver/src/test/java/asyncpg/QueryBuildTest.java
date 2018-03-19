@@ -61,8 +61,7 @@ public class QueryBuildTest extends DbTestBase {
                 conn.simpleQueryRows("SELECT * FROM testReuseBound").
                     thenAccept(rows -> Assert.assertEquals(0, rows.size())).
                     thenApply(__ -> conn)).
-            thenCompose(conn -> conn.reusePrepared("testReuseBound-query")).
-            thenCompose(pConn -> pConn.reuseBound("testReuseBound-bound")).
+            thenCompose(conn -> conn.reuseBound("testReuseBound-bound")).
             thenCompose(bConn -> bConn.executeAndDone()).
             thenCompose(rConn -> rConn.done()).
             thenCompose(conn -> conn.commitTransaction()).
@@ -74,5 +73,39 @@ public class QueryBuildTest extends DbTestBase {
     );
   }
 
-  // TODO: test execute partial
+  @Test
+  public void testBoundExecuteMax() {
+    // Grab some, then go back and grab the rest
+    StringBuilder inserts = new StringBuilder();
+    for (int i = 0; i < 50; i++) inserts.append("\nINSERT INTO testBoundExecuteMax VALUES(" + i + ");");
+    withConnectionSync(c ->
+        c.simpleQueryExec("CREATE TABLE testBoundExecuteMax (foo INTEGER); " + inserts).
+            thenCompose(conn -> conn.beginTransaction()).
+            thenCompose(conn -> conn.prepare("SELECT * FROM testBoundExecuteMax ORDER BY foo")).
+            thenCompose(pConn -> pConn.bindReusable("testBoundExecuteMax-bound")).
+            thenCompose(bConn -> bConn.describe()).
+            thenCompose(bConn -> bConn.execute(20)).
+            thenCompose(bConn -> bConn.done()).
+            thenCompose(rConn ->
+                rConn.collectRows().thenCompose(rows -> {
+                  Assert.assertTrue(rConn.isSuspended());
+                  Assert.assertEquals(20, rows.size());
+                  for (int i = 0; i < rows.size(); i++)
+                    Assert.assertEquals(i, RowReader.DEFAULT.get(rows.get(i), "foo", Integer.class).intValue());
+                  return rConn.done();
+                })).
+            thenCompose(conn -> conn.reuseBound("testBoundExecuteMax-bound")).
+            thenCompose(bConn -> bConn.describeExecuteAndDone()).
+            thenCompose(rConn ->
+                rConn.collectRows().thenCompose(rows -> {
+                  Assert.assertFalse(rConn.isSuspended());
+                  Assert.assertEquals(30, rows.size());
+                  for (int i = 0; i < rows.size(); i++)
+                    Assert.assertEquals(i + 20, RowReader.DEFAULT.get(rows.get(i), 0, Integer.class).intValue());
+                  return rConn.done();
+                })).
+            thenCompose(conn -> conn.commitTransaction()).
+            thenCompose(conn -> conn.simpleQueryExec("DROP TABLE testBoundExecuteMax"))
+    );
+  }
 }

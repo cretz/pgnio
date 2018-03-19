@@ -90,6 +90,7 @@ public interface BufWriter {
       if (buf.capacity() - buf.position() < needed) {
         // Round up to the next step and then add it
         int newAmount = (((buf.capacity() + needed) / bufferStep) + 1) * bufferStep;
+        buf.flip();
         buf = (directBuffer ? ByteBuffer.allocateDirect(newAmount) : ByteBuffer.allocate(newAmount)).put(buf);
       }
       return buf;

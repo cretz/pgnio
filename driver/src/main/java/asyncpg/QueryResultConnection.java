@@ -17,7 +17,8 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   protected final T prevConn;
   protected int queryCounter;
   protected QueryMessage.@Nullable RowMeta lastRowMeta;
-  protected @Nullable QueryMessage doneMessage;
+  protected boolean done;
+  protected boolean suspended;
   protected final boolean willEndWithDone;
   protected boolean copyInWaitingForComplete;
   protected boolean copyOutWaitingForComplete;
@@ -29,13 +30,13 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   }
 
   /** True if this set of results is done */
-  public boolean isDone() { return doneMessage != null; }
+  public boolean isDone() { return done; }
 
   /**
    * True if this set of results is done and suspended pending another call to
    * {@link QueryBuildConnection.Bound#execute(int)}
    */
-  public boolean isSuspended() { return doneMessage instanceof QueryMessage.PortalSuspended; }
+  public boolean isSuspended() { return suspended; }
 
   /** Note, this consumes the buf */
   protected QueryMessage handleReadMessage() {
@@ -140,7 +141,8 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         queryCounter++;
         lastRowMeta = null;
       }
-      if (msg.isQueryingDoneMessage()) doneMessage = msg;
+      if (msg instanceof QueryMessage.PortalSuspended) suspended = true;
+      if (msg.isQueryingDoneMessage()) done = true;
     });
   }
 
