@@ -18,7 +18,7 @@ public abstract class Connection implements AutoCloseable {
 
   public static CompletableFuture<Startup> init(Config config) {
     log.log(Level.FINE, "Connecting to {0}", config.hostname);
-    return config.connector.get().thenApply(io -> new Startup(config, io));
+    return config.ioConnector.get().thenApply(io -> new Startup(config, io));
   }
 
   public static CompletableFuture<QueryReadyConnection.AutoCommit> authed(Config config) {
@@ -336,8 +336,7 @@ public abstract class Connection implements AutoCloseable {
   }
 
   public static abstract class Started extends Connection {
-    // True when inside a query or something similar
-    protected boolean invalid;
+    protected @Nullable Started controlPassedTo;
 
     protected Started(Context ctx) { super(ctx); }
 
@@ -355,8 +354,18 @@ public abstract class Connection implements AutoCloseable {
     }
 
     protected void assertValid() {
-      if (invalid) throw new IllegalStateException(
+      if (controlPassedTo != null) throw new IllegalStateException(
           "Attempting to reuse a connection in an invalid state. Did you forget a 'done' somewhere?");
     }
+
+    protected <T extends Started> T passControlTo(T conn) {
+      assertValid();
+      this.controlPassedTo = conn;
+      return conn;
+    }
+
+    protected void resumeControl() { controlPassedTo = null; }
+
+    protected abstract CompletableFuture<QueryReadyConnection.AutoCommit> reset();
   }
 }

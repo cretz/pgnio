@@ -27,9 +27,13 @@ public class Config {
   public boolean logNotices = true;
   public boolean preferText = true;
   public ParamWriter paramWriter = ParamWriter.DEFAULT;
+  public int poolSize = 5;
 
   @SuppressWarnings("initialization")
-  public Supplier<CompletableFuture<? extends ConnectionIo>> connector =
+  public Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector = Connection::authed;
+
+  @SuppressWarnings("initialization")
+  public Supplier<CompletableFuture<? extends ConnectionIo>> ioConnector =
       () -> ConnectionIo.AsyncSocketChannel.connect(this);
 
   // Must be initialized
@@ -68,8 +72,13 @@ public class Config {
   public Config logNotices(boolean logNotices) { this.logNotices = logNotices; return this; }
   public Config preferText(boolean preferText) { this.preferText = preferText; return this; }
   public Config paramWriter(ParamWriter paramWriter) { this.paramWriter = paramWriter; return this; }
-  public Config connector(Supplier<CompletableFuture<? extends ConnectionIo>> connector) {
+  public Config poolSize(int poolSize) { this.poolSize = poolSize; return this; }
+  public Config connector(Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector) {
     this.connector = connector;
+    return this;
+  }
+  public Config ioConnector(Supplier<CompletableFuture<? extends ConnectionIo>> ioConnector) {
+    this.ioConnector = ioConnector;
     return this;
   }
   // Should come initialized

@@ -12,9 +12,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 
 public class Util {
-
-  // TODO: there is room for wins to reuse char/byte buffers for decoding
-
   @SuppressWarnings("type.argument.type.incompatible")
   private static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
       StandardCharsets.UTF_8.newDecoder().
@@ -25,6 +22,8 @@ public class Util {
       StandardCharsets.UTF_8.newEncoder().
           onMalformedInput(CodingErrorAction.REPORT).
           onUnmappableCharacter(CodingErrorAction.REPORT));
+
+  // TODO: there's room for wins on some of these to reuse char/byte buffers for decoding
 
   public static String stringFromBytes(byte[] bytes) {
     return stringFromByteBuffer(ByteBuffer.wrap(bytes));

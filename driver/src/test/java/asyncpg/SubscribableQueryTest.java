@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class SubscribableQueryTest extends DbTestBase {
-
   @Test
   public void testNotifications() throws Exception {
     BlockingQueue<Subscribable.Notification> notifications = new ArrayBlockingQueue<>(20);

@@ -1,7 +1,5 @@
 package asyncpg;
 
-import org.checkerframework.checker.nullness.qual.Nullable;
-
 import java.util.concurrent.CompletableFuture;
 
 public abstract class QueryBuildConnection
@@ -46,6 +44,11 @@ public abstract class QueryBuildConnection
     ctx.writeByte((byte) 'S').writeLengthIntBegin().writeLengthIntEnd();
     ctx.buf.flip();
     return writeFrontendMessage();
+  }
+
+  @Override
+  protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() {
+    return done().thenCompose(QueryResultConnection::reset);
   }
 
   public CompletableFuture<QueryResultConnection<T>> done() {

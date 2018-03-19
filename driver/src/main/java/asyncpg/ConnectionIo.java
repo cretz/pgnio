@@ -15,6 +15,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public interface ConnectionIo {
+  boolean isOpen();
+
   CompletableFuture<Void> close();
 
   // -1 if not connected
@@ -48,6 +50,9 @@ public interface ConnectionIo {
     protected AsyncSocketChannel(AsynchronousSocketChannel ch) {
       this.ch = ch;
     }
+
+    @Override
+    public boolean isOpen() { return ch.isOpen(); }
 
     @Override
     public CompletableFuture<Void> close() {
@@ -148,6 +153,9 @@ public interface ConnectionIo {
       netReadBuf = allocBuf(directBuffer, sslEngine.getSession().getPacketBufferSize());
       netWriteBuf = allocBuf(directBuffer, sslEngine.getSession().getPacketBufferSize());
     }
+
+    @Override
+    public boolean isOpen() { return underlying.isOpen(); }
 
     @Override
     public CompletableFuture<Void> close() {

@@ -6,7 +6,6 @@ import org.junit.Test;
 import java.nio.charset.StandardCharsets;
 
 public class CopyTest extends DbTestBase {
-
   @Test
   public void testSimplyCopy() {
     withConnectionSync(c ->

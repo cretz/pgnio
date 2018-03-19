@@ -13,12 +13,13 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 public class QueryResultConnection<T extends Connection.Started> extends Connection.Started {
-
   protected final T prevConn;
   protected int queryCounter;
   protected QueryMessage.@Nullable RowMeta lastRowMeta;
   protected @Nullable QueryMessage doneMessage;
   protected final boolean willEndWithDone;
+  protected boolean copyInWaitingForComplete;
+  protected boolean copyOutWaitingForComplete;
 
   protected QueryResultConnection(Context ctx, T prevConn, boolean willEndWithDone) {
     super(ctx);
@@ -46,6 +47,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         return new QueryMessage.CloseComplete(queryCounter);
       // CopyDone
       case 'c':
+        copyOutWaitingForComplete = false;
         return new QueryMessage.CopyDone(queryCounter);
       // CopyData
       case 'd':
@@ -96,6 +98,8 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         for (int i = 0; i < columnsText.length; i++) columnsText[i] = ctx.buf.getShort() == 0;
         QueryMessage.CopyBegin.Direction dir = typ == 'G' ? QueryMessage.CopyBegin.Direction.IN :
             (typ == 'H' ? QueryMessage.CopyBegin.Direction.OUT : QueryMessage.CopyBegin.Direction.BOTH);
+        if (dir != QueryMessage.CopyBegin.Direction.IN) copyOutWaitingForComplete = true;
+        if (dir != QueryMessage.CopyBegin.Direction.OUT) copyInWaitingForComplete = true;
         return new QueryMessage.CopyBegin(queryCounter, dir, text, columnsText);
       // RowDescription
       case 'T':
@@ -114,7 +118,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       // ReadyForQuery
       case 'Z':
         updateReadyForQueryTransactionStatus();
-        return new QueryMessage.PortalSuspended(queryCounter);
+        return new QueryMessage.ReadyForQuery(queryCounter);
       default: throw new IllegalArgumentException("Unrecognized query message type: " + typ);
     }
   }
@@ -193,11 +197,18 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return next(QueryMessage.Complete.class).thenApply(complete -> complete == null ? null : complete.getRowCount());
   }
 
+  @Override
+  protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
+
   public CompletableFuture<T> done() {
+    // Send/wait for copy completes if necessary
+    if (copyInWaitingForComplete || copyOutWaitingForComplete)
+      return new Copy<>(ctx, this, copyInWaitingForComplete, copyOutWaitingForComplete).done();
+
     if (!willEndWithDone) return CompletableFuture.completedFuture(prevConn);
     // Consume all until done
     return next(__ -> false).thenApply(__ -> {
-      prevConn.invalid = false;
+      prevConn.resumeControl();
       return prevConn;
     });
   }
@@ -256,7 +267,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     ctx.buf.clear();
     ctx.writeByte((byte) 'c').writeLengthIntBegin().writeLengthIntEnd();
     ctx.buf.flip();
-    return writeFrontendMessage();
+    return writeFrontendMessage().thenRun(() -> copyInWaitingForComplete = false);
   }
 
   public CompletableFuture<Void> copyInComplete() { return sendCopyDone(); }
@@ -265,7 +276,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     ctx.buf.clear();
     ctx.writeByte((byte) 'f').writeLengthIntBegin().writeCString(message).writeLengthIntEnd();
     ctx.buf.flip();
-    return writeFrontendMessage();
+    return writeFrontendMessage().thenRun(() -> copyInWaitingForComplete = false);
   }
 
   public CompletableFuture<Void> copyInFail(String message) { return sendCopyFail(message); }
@@ -363,6 +374,9 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         return receiveIgnoreUntilComplete();
       }).thenApply(copy -> copy.prevConn);
     }
+
+    @Override
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
 
     public CompletableFuture<T> done() { return complete().thenCompose(QueryResultConnection::done); }
   }

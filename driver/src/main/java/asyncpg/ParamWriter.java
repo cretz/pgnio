@@ -8,7 +8,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ParamWriter {
-
   // Keyed by class name
   public static final Map<String, Converters.From> DEFAULT_CONVERTERS =
       Collections.unmodifiableMap(Converters.loadAllFromConverters());

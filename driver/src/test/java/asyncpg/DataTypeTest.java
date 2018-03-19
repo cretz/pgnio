@@ -8,7 +8,6 @@ import java.lang.reflect.Modifier;
 import java.util.Arrays;
 
 public class DataTypeTest extends TestBase {
-
   static final Field[] oidFields = Arrays.stream(DataType.class.getDeclaredFields()).
       filter(f -> Modifier.isStatic(f.getModifiers()) && f.getType() == Integer.TYPE).
       toArray(Field[]::new);

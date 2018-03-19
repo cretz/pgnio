@@ -21,7 +21,6 @@ import static asyncpg.DataType.*;
 @RunWith(Parameterized.class)
 @SuppressWarnings("unchecked")
 public class QueryTest extends DbTestBase {
-
   /* TODO:
       - test big integer w/ decimal
       - test errors
