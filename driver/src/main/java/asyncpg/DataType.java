@@ -16,6 +16,7 @@ import java.time.Period;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+/** Set of OIDs and subclasses representing Postgres types */
 public class DataType {
   public static final int UNSPECIFIED = 0;
 
@@ -187,12 +188,13 @@ public class DataType {
     dataTypes.putAll(map);
   }
 
+  /** Get data type name for given OID, or null if unknown */
   public static @Nullable String nameForOid(int oid) { return dataTypes.get(oid); }
 
-  // Returns unspecified if unknown
+  /** Return the same passed in OID if known or {@link #UNSPECIFIED} otherwise */
   public static int normalizeOid(int oid) { return dataTypes.containsKey(oid) ? oid : UNSPECIFIED; }
 
-  // Either the non-array form or unspecified
+  /** Return the component type of the known array OID or {@link #UNSPECIFIED} if not a known array OID */
   public static int arrayComponentOid(int oid) {
     switch (oid) {
       case BIT_ARRAY: return BIT;
@@ -240,8 +242,11 @@ public class DataType {
 
   private DataType() { }
 
+  /** Representation of Postgres "money" */
   public static class Money {
+    /** Shortcut for {@link #valueOf(String, Locale)} with default locale */
     public static Money valueOf(String string) { return valueOf(string, null); }
+    /** Parse the Postgres-formatted money string with the given locale currency (or default if locale is null) */
     public static Money valueOf(String string, @Nullable Locale locale) {
       // Format is like $100 or ($300.00)
       boolean negative = string.charAt(0) == '(' && string.charAt(string.length() - 1) == ')';
@@ -259,7 +264,9 @@ public class DataType {
       } catch (ParseException e) { throw new RuntimeException(e); }
     }
 
+    /** The currency symbol */
     public final String symbol;
+    /** The monetary value */
     public final BigDecimal value;
 
     public Money(String symbol, BigDecimal value) {
@@ -282,10 +289,12 @@ public class DataType {
     public String toString() { return symbol + value; }
   }
 
+  /** Representation of Postgres "interval" */
   public static class Interval {
-    // Format: [N year[s]] [N mon[s]] [N day[s]] [ISO 8601 local time]
-    // Empty: ISO 8601 local time
+    /** Parse Postgres interval string */
     public static Interval valueOf(String str) {
+      // Format: [N year[s]] [N mon[s]] [N day[s]] [ISO 8601 local time]
+      // Empty: ISO 8601 local time
       List<String> pieces = Util.splitByChar(str, ' ');
       boolean hasTime = pieces.size() % 2 == 1;
       int datePieceMax = hasTime ? pieces.size() - 1 : pieces.size();
@@ -321,7 +330,9 @@ public class DataType {
       return new Interval(Period.of(years, mons, days), timeDuration);
     }
 
+    /** The date part of the interval */
     public final Period datePeriod;
+    /** The time part of the interval (does not include "days") */
     public final Duration timeDuration;
 
     public Interval(Period datePeriod, Duration timeDuration) {
@@ -374,9 +385,11 @@ public class DataType {
     }
   }
 
+  /** Representation of Postgres "point" */
   public static class Point {
-    // Format: (x,y)
+    /** Parse Postgres point string */
     public static Point valueOf(String str) {
+      // Format: (x,y)
       int commaIndex = str.indexOf(',');
       if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized point format: " + str);
@@ -407,9 +420,11 @@ public class DataType {
     public String toString() { return "(" + x + "," + y + ")"; }
   }
 
+  /** Representation of Postgres "line" */
   public static class Line {
-    // Format: {A,B,C}
+    /** Parse Postgres line string */
     public static Line valueOf(String str) {
+      // Format: {A,B,C}
       int commaIndex = str.indexOf(',');
       int secondCommaIndex = str.indexOf(',', commaIndex + 1);
       if (str.isEmpty() || str.charAt(0) != '{' || str.charAt(str.length() - 1) != '}' ||
@@ -445,9 +460,11 @@ public class DataType {
     public String toString() { return "{" + a + "," + b + "," + c + "}"; }
   }
 
+  /** Representation of Postgres "lseg" */
   public static class LineSegment {
-    // Format: [(x1,y1),(x2,y2)]
+    /** Parse Postgres line segment string */
     public static LineSegment valueOf(String str) {
+      // Format: [(x1,y1),(x2,y2)]
       int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
       if (str.isEmpty() || str.charAt(0) != '[' || str.charAt(str.length() - 1) != ']' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized segment format: " + str);
@@ -478,9 +495,11 @@ public class DataType {
     public String toString() { return "[" + point1 + "," + point2 + "]"; }
   }
 
+  /** Representation of Postgres "box" */
   public static class Box {
-    // Format: (x1,y1),(x2,y2)
+    /** Parse Postgres box string */
     public static Box valueOf(String str) {
+      // Format: (x1,y1),(x2,y2)
       int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
       if (str.isEmpty() || str.charAt(0) != '(' || str.charAt(str.length() - 1) != ')' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized box format: " + str);
@@ -488,10 +507,14 @@ public class DataType {
           Point.valueOf(str.substring(commaIndex + 1, str.length())));
     }
 
+    /** The upper-right corner */
     public final Point point1;
+    /** The lower-left corner */
     public final Point point2;
 
-    // Note, these may be switched before set on fields to put upper right in point 1 and lower left in point 2
+    /**
+     * This automatically puts the upper-right point in point1 and upper-left in point2 regardless of order passed in
+     */
     public Box(Point point1, Point point2) {
       this.point1 = new Point(Math.max(point1.x, point2.x), Math.max(point1.y, point2.y));
       this.point2 = new Point(Math.min(point1.x, point2.x), Math.min(point1.y, point2.y));
@@ -512,10 +535,12 @@ public class DataType {
     public String toString() { return point1 + "," + point2; }
   }
 
+  /** Representation of Postgres "path" */
   public static class Path {
-    // Format closed: ((x1,y1),...)
-    // Format open: [(x1,y1),...]
+    /** Parse Postgres path string */
     public static Path valueOf(String str) {
+      // Format closed: ((x1,y1),...)
+      // Format open: [(x1,y1),...]
       char type = str.charAt(0);
       if ((type != '[' && type != '(') || (type == '[' && str.charAt(str.length() - 1) != ']')  ||
           (type == '(' && str.charAt(str.length() - 1) != ')'))
@@ -565,9 +590,11 @@ public class DataType {
     }
   }
 
+  /** Representation of Postgres "polygon" */
   public static class Polygon {
-    // Format: ((x1,y1),...)
+    /** Parse Postgres polygon string */
     public static Polygon valueOf(String str) {
+      // Format: ((x1,y1),...)
       return new Polygon(Path.valueOf(str));
     }
 
@@ -575,6 +602,7 @@ public class DataType {
 
     public Polygon(Point... points) { this(new Path(points, true)); }
 
+    /** Must be a closed path */
     public Polygon(Path path) {
       if (!path.closed) throw new IllegalArgumentException("Polygon paths are closed");
       this.path = path;
@@ -595,9 +623,11 @@ public class DataType {
     public String toString() { return path.toString(); }
   }
 
+  /** Representation of Postgres "circle" */
   public static class Circle {
-    // Format: <(x,y),r>
+    /** Parse Postgres circle string */
     public static Circle valueOf(String str) {
+      // Format: <(x,y),r>
       int commaIndex = str.indexOf(',', str.indexOf(',') + 1);
       if (str.isEmpty() || str.charAt(0) != '<' || str.charAt(str.length() - 1) != '>' || commaIndex == -1)
         throw new IllegalArgumentException("Unrecognized circle format: " + str);
@@ -628,7 +658,9 @@ public class DataType {
     public String toString() { return "<" + center + "," + radius + ">"; }
   }
 
+  /** Representation of Postgres "inet" or "cidr" */
   public static class Inet {
+    /** Parse Postgres inet or cidr string */
     public static Inet valueOf(String str) {
       Integer netmask = null;
       int slashIndex = str.lastIndexOf('/');
@@ -670,7 +702,9 @@ public class DataType {
     }
   }
 
+  /** Representation of Postgres "macaddr" or "macaddr8" */
   public static class MacAddr {
+    /** Parse Postgres macaddr or macaddr8 string */
     public static MacAddr valueOf(String str) {
       List<String> pieces = Util.splitByChar(str, ':');
       byte[] bytes = new byte[pieces.size()];

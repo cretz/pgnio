@@ -37,11 +37,21 @@ public class ConnectionPool {
   }
 
   // if it's null, we'll create a new one
+  @SuppressWarnings("dereference.of.nullable")
   public void returnConnection(QueryReadyConnection.@Nullable AutoCommit conn) {
     try {
       // Only put back if still open. No, we don't deal with errors here before creating a new connection.
       // This is because it becomes too complicated, instead we just make the next take fail.
-      connections.put(conn != null && conn.ctx.io.isOpen() ? conn.reset() : newConnection());
+      if (conn == null || !conn.ctx.io.isOpen()) {
+        connections.put(newConnection());
+      } else {
+        // We have to remove all subscriptions
+        connections.put(conn.fullReset().whenComplete((__, ___) -> {
+          conn.notices().unsubscribeAll();
+          conn.notifications().unsubscribeAll();
+          conn.parameterStatuses().unsubscribeAll();
+        }));
+      }
     } catch (InterruptedException e) { throw new RuntimeException(e); }
   }
 

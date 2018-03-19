@@ -24,6 +24,8 @@ public class Subscribable<T> {
     return subscriptions.remove(cb);
   }
 
+  public void unsubscribeAll() { subscriptions.clear(); }
+
   public CompletableFuture<Void> publish(T item) {
     // We choose to go one at a time instead of allOf here because of the synchronous reqs of the Connection
     CompletableFuture<Void> ret = CompletableFuture.completedFuture(null);

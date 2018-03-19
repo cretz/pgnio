@@ -5,22 +5,29 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/** Base class for all connections. Implementations are instances of either {@link Startup} or {@link Started} */
 public abstract class Connection implements AutoCloseable {
+  /** Logger, made visible for those that might want to call {@link Logger#addHandler(Handler)} */
   public static final Logger log = Logger.getLogger(Connection.class.getName());
 
+  /** Make initial DB connection and return ready for startup */
   public static CompletableFuture<Startup> init(Config config) {
     log.log(Level.FINE, "Connecting to {0}", config.hostname);
-    return config.ioConnector.get().thenApply(io -> new Startup(config, io));
+    return config.ioConnector.apply(config).thenApply(io -> new Startup(config, io));
   }
 
+  /** {@link #init(Config)} + {@link Startup#auth()} */
   public static CompletableFuture<QueryReadyConnection.AutoCommit> authed(Config config) {
     return init(config).thenCompose(Startup::auth);
   }
@@ -39,9 +46,9 @@ public abstract class Connection implements AutoCloseable {
     return writeFrontendMessage();
   }
 
+  /** Send terminate and close the connection */
   public CompletableFuture<Void> terminate() { return sendTerminate().whenComplete((__, ___) -> ctx.io.close()); }
 
-  // Good for use on handle
   protected <@Nullable T> CompletableFuture<T> terminate(T ret, @Nullable Throwable ex) {
     return terminate().handle((__, termEx) -> {
       if (ex != null && termEx != null) log.log(Level.WARNING, "Failed terminating", termEx);
@@ -54,27 +61,31 @@ public abstract class Connection implements AutoCloseable {
     });
   }
 
-  // Good for use on handle
+  /** Shortcut for {@link #terminate()} for use with {@link CompletableFuture#handle(BiFunction)} */
   public <T> CompletableFuture<T> terminated(@Nullable CompletableFuture<T> ret, @Nullable Throwable ex) {
     if (ret != null) return terminated(ret);
     return terminate(ret, ex).thenCompose(Function.identity());
   }
 
+  /** Shortcut for {@link #terminate()} */
   public <T> CompletableFuture<T> terminated(CompletableFuture<T> fut) {
     return fut.handle(this::terminate).thenCompose(Function.identity());
   }
 
+  /** Subscription management for notices on this connection */
   public Subscribable<Subscribable.Notice> notices() { return ctx.noticeSubscribable; }
+  /** Subscription management for notifications on this connection */
   public Subscribable<Subscribable.Notification> notifications() { return ctx.notificationSubscribable; }
+  /** Subscription management for parameter status changes on this connection */
   public Subscribable<Subscribable.ParameterStatus> parameterStatuses() { return ctx.parameterStatusSubscribable; }
 
-  public Map<String, String> getRuntimeParameters() { return ctx.runtimeParameters; }
+  /** Read only map of runtime parameters sent from the connection on startup or changed during use */
+  public Map<String, String> getRuntimeParameters() { return Collections.unmodifiableMap(ctx.runtimeParameters); }
 
   protected CompletableFuture<Void> readBackendMessage() {
     return readBackendMessage(ctx.config.defaultTimeout, ctx.config.defaultTimeoutUnit);
   }
 
-  // The resulting buffer is only valid until next read/write
   protected CompletableFuture<Void> readBackendMessage(long timeout, TimeUnit timeoutUnit) {
     ctx.buf.clear();
     // We need 5 bytes to get the type and size
@@ -99,7 +110,10 @@ public abstract class Connection implements AutoCloseable {
     return ctx.io.writeFull(ctx.buf, timeout, timeoutUnit).thenRun(() -> ctx.buf.clear());
   }
 
-  // Returns null if not handled here
+  /**
+   * Assuming buffer populated w/ message, this peeks and if it is a general message, it handles it and returns a
+   * future. If it is not a general message, it returns null.
+   */
   protected @Nullable CompletableFuture<Void> handleGeneralResponse() {
     char typ = (char) ctx.buf.get(0);
     switch (typ) {
@@ -135,6 +149,7 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
+  /** Basically {@link #readBackendMessage()} repeatedly until not handled with {@link #handleGeneralResponse()} */
   protected CompletableFuture<Void> readNonGeneralBackendMessage() {
     return readBackendMessage().thenCompose(__ -> {
       CompletableFuture<Void> generalHandled = handleGeneralResponse();
@@ -143,7 +158,7 @@ public abstract class Connection implements AutoCloseable {
     });
   }
 
-  // Assumes buffer is at the status position
+  /** Assuming buffer is at position to read status, this reads it and sets it */
   protected void updateReadyForQueryTransactionStatus() {
     char status = (char) ctx.buf.get();
     switch (status) {
@@ -160,10 +175,13 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
+  /** Contextual state kept by a connection */
   public static class Context extends BufWriter.Simple<Context> {
+    /** The config */
     public final Config config;
-    // Note, this is replaced when going SSL
+    /** The IO connection. Usually immutable, but can be replaced when going to SSL */
     public ConnectionIo io;
+
     protected final Subscribable<Subscribable.Notice> noticeSubscribable = new Subscribable<>();
     protected final Subscribable<Subscribable.Notification> notificationSubscribable = new Subscribable<>();
     protected final Subscribable<Subscribable.ParameterStatus> parameterStatusSubscribable = new Subscribable<>();
@@ -184,6 +202,7 @@ public abstract class Connection implements AutoCloseable {
       });
     }
 
+    /** Read a null-terminated string off the buffer */
     public String bufReadString() {
       int indexOfZero = buf.position();
       while (buf.get(indexOfZero) != 0) indexOfZero++;
@@ -197,7 +216,6 @@ public abstract class Connection implements AutoCloseable {
       return ret;
     }
 
-    // Mostly just for the benefit of loggers
     @Override
     public String toString() {
       return "[" + config.username + "@" + config.hostname + ":" + config.port + "->" +
@@ -205,11 +223,11 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
+  /** Connection connected but not authed */
   public static class Startup extends Connection {
-    protected Startup(Config config, ConnectionIo io) {
-      super(new Context(config, io));
-    }
+    protected Startup(Config config, ConnectionIo io) { super(new Context(config, io)); }
 
+    /** Perform the auth handshake */
     public CompletableFuture<QueryReadyConnection.AutoCommit> auth() {
       CompletableFuture<?> sslComplete;
       if (ctx.config.ssl == null || ctx.config.ssl) sslComplete = startSsl(ctx.config.ssl != null);
@@ -326,7 +344,12 @@ public abstract class Connection implements AutoCloseable {
       });
     }
 
-    protected CompletableFuture<Void> cancelOther(int processId, int secretKey) {
+    /**
+     * Cancel another already-started connection using its {@link Started#getProcessId()} and
+     * {@link Started#getSecretKey()}. This connection is closed after this call and can not tell the caller whether it
+     * succeeded or failed.
+     */
+    public CompletableFuture<Void> cancelOther(int processId, int secretKey) {
       // Send the cancel request and just close the connection
       ctx.buf.clear();
       ctx.writeInt(16).writeInt(80877102).writeInt(processId).writeInt(secretKey);
@@ -335,16 +358,28 @@ public abstract class Connection implements AutoCloseable {
     }
   }
 
+  /** Base class for all authenticated connection states */
   public static abstract class Started extends Connection {
     protected @Nullable Started controlPassedTo;
 
     protected Started(Context ctx) { super(ctx); }
 
+    /**
+     * The process ID of this connection. Used in conjunction with {@link #getSecretKey()} for
+     * {@link Startup#cancelOther(int, int)} for out-of-process cancellation.
+     */
     public @Nullable Integer getProcessId() { return ctx.processId; }
+    /**
+     * The secret key of this connection. Used in conjunction with {@link #getProcessId()} for
+     * {@link Startup#cancelOther(int, int)} for out-of-process cancellation.
+     */
     public @Nullable Integer getSecretKey() { return ctx.secretKey; }
 
-    // Tick for general messages, errors when timeout reached (java.nio.channels.InterruptedByTimeoutException) or
-    // if a non-general message is sent
+    /**
+     * Basically just a check for general messages. This is useful for waiting for next subscribable item like
+     * notifications. The resulting future will be errored if timeout is reached or if a non-general message is
+     * received.
+     */
     public CompletableFuture<Void> unsolicitedMessageTick(long timeout, TimeUnit timeoutUnit) {
       return readBackendMessage(timeout, timeoutUnit).thenCompose(__ -> {
         CompletableFuture<Void> generalHandled = handleGeneralResponse();
@@ -367,5 +402,13 @@ public abstract class Connection implements AutoCloseable {
     protected void resumeControl() { controlPassedTo = null; }
 
     protected abstract CompletableFuture<QueryReadyConnection.AutoCommit> reset();
+
+    /**
+     * Completely reset this connection back to {@link QueryReadyConnection.AutoCommit} and ready to query regardless of
+     * the state it is currently in. Among other uses, this is used by the connection pool to reset the connection.
+     */
+    public CompletableFuture<QueryReadyConnection.AutoCommit> fullReset() {
+      return controlPassedTo != null ? controlPassedTo.fullReset() : reset();
+    }
   }
 }

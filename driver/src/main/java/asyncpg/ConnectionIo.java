@@ -14,14 +14,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/** Simple intrface to implement for network IO to/from server */
 public interface ConnectionIo {
+  /** Whether or not the network connection is still open */
   boolean isOpen();
 
+  /** Close the network connection asynchronously */
   CompletableFuture<Void> close();
 
-  // -1 if not connected
+  /** Get the local port that is being used to connect to the remote port or -1 if not connected */
   int getLocalPort();
 
+  /**
+   * Completely fill buf or time out. This is a shortcut for repeatedly calling
+   * {@link #readSome(ByteBuffer, long, TimeUnit)} until full.
+   */
   default CompletableFuture<Void> readFull(ByteBuffer buf, long timeout, TimeUnit timeoutUnit) {
     return readSome(buf, timeout, timeoutUnit).thenCompose(__ -> {
       if (buf.hasRemaining()) return readFull(buf, timeout, timeoutUnit);
@@ -29,13 +36,17 @@ public interface ConnectionIo {
     });
   }
 
+  /** Read at least one byte into buf or time out. Can't read past the limit of buf. */
   CompletableFuture<Void> readSome(ByteBuffer buf, long timeout, TimeUnit timeoutUnit);
 
+  /** Write all contents of buf or time out */
   CompletableFuture<Void> writeFull(ByteBuffer buf, long timeout, TimeUnit timeoutUnit);
 
+  /** Implementation of {@link ConnectionIo} using {@link AsynchronousSocketChannel} */
   class AsyncSocketChannel implements ConnectionIo {
     private static final Logger log = Logger.getLogger(AsyncSocketChannel.class.getName());
 
+    /** Connect using the hostname and port in the config */
     public static CompletableFuture<AsyncSocketChannel> connect(Config config) {
       try {
         CompletableFuture<Void> ret = new CompletableFuture<>();
@@ -47,9 +58,7 @@ public interface ConnectionIo {
 
     protected final AsynchronousSocketChannel ch;
 
-    protected AsyncSocketChannel(AsynchronousSocketChannel ch) {
-      this.ch = ch;
-    }
+    protected AsyncSocketChannel(AsynchronousSocketChannel ch) { this.ch = ch; }
 
     @Override
     public boolean isOpen() { return ch.isOpen(); }
@@ -120,8 +129,9 @@ public interface ConnectionIo {
     }
   }
 
+  /** SSL wrapper for an underlying {@link ConnectionIo} */
   class Ssl implements ConnectionIo {
-    // Lots of help from, among others, https://github.com/jesperdj/sslclient
+    // XXX: This implementation has lots of help from, among others, https://github.com/jesperdj/sslclient
     protected static final Logger log = Logger.getLogger(Ssl.class.getName());
 
     protected static ByteBuffer allocBuf(boolean directBuffer, int amount) {
@@ -139,6 +149,7 @@ public interface ConnectionIo {
     protected ByteBuffer netReadBuf;
     protected ByteBuffer netWriteBuf;
 
+    /** Create SSL wrapper with the given engine and config params */
     public Ssl(ConnectionIo underlying, SSLEngine sslEngine, boolean directBuffer,
         long defaultTimeout, TimeUnit defaultTimeoutUnit) {
       this.underlying = underlying;
@@ -166,6 +177,7 @@ public interface ConnectionIo {
     @Override
     public int getLocalPort() { return underlying.getLocalPort(); }
 
+    /** Begin the handshake */
     public CompletableFuture<Void> start() {
       log.log(Level.FINER, "Starting SSL handshake");
       try {

@@ -13,7 +13,12 @@ import java.util.function.Function;
 
 import static asyncpg.DataType.*;
 
+/**
+ * Interface for sets of converters. These are loaded via {@link ServiceLoader} for instances of this interface.
+ */
 public interface Converters {
+
+  /** Use {@link ServiceLoader} to load converter sets and return in order of priority (lower first) */
   static List<Converters> loadConverters() {
     List<Converters> ret = new ArrayList<>();
     ServiceLoader.load(Converters.class).iterator().forEachRemaining(ret::add);
@@ -21,42 +26,78 @@ public interface Converters {
     return ret;
   }
 
+  /** Shortcut for {@link #loadConverters()} + {@link #loadToConverters()} */
   static Map<String, Converters.To> loadAllToConverters() {
     Map<String, Converters.To> ret = new HashMap<>();
     for (Converters convs : loadConverters()) ret.putAll(convs.loadToConverters());
     return ret;
   }
 
+  /** Shortcut for {@link #loadConverters()} + {@link #loadFromConverters()} */
   static Map<String, Converters.From> loadAllFromConverters() {
     Map<String, Converters.From> ret = new HashMap<>();
     for (Converters convs : loadConverters()) ret.putAll(convs.loadFromConverters());
     return ret;
   }
 
+  /**
+   * The priority of this converter set vs others. Lower priority number is used first. Default value is 1, built-in
+   * converters are 0.
+   */
   default double getPriority() { return 1; }
+  /** Load to-converters in this set keyed by class name */
   Map<String, Converters.To> loadToConverters();
+  /** Load from-converters in this set keyed by class name */
   Map<String, Converters.From> loadFromConverters();
 
+  /**
+   * A "to converter" which is a converter that converts from a Postgres value to a Java value. While there are a couple
+   * of methods here, implementers only need to implement {@link #convertTo(int, boolean, byte[])}. For most uses, only
+   * the text format needs to be supported.
+   */
   @FunctionalInterface
   interface To<T> {
+    /**
+     * What the delimiter is when reading arrays of this type. In Postgres this is always ',' (the default) except for
+     * the geometric "box" type.
+     */
     default char arrayDelimiter() { return ','; }
 
+    /** Shortcut for {@link #convertToNullable(QueryMessage.RowMeta.Column, byte[])} */
     default @Nullable T convertToNullable(
         QueryMessage.RowMeta.Column column, byte@Nullable [] bytes) {
       return convertToNullable(column.dataTypeOid, column.textFormat, bytes);
     }
 
+    /**
+     * Returns null if bytes are null, otherwise defers to {@link #convertTo(int, boolean, byte[])}. This method can be
+     * overridden if there is a need to read certain non-null values as null.
+     */
     default @Nullable T convertToNullable(
         int dataTypeOid, boolean textFormat, byte@Nullable [] bytes) {
       return bytes == null ? null : convertTo(dataTypeOid, textFormat, bytes);
     }
 
-    // If this returns null, it is assumed this cannot decode it
+    /**
+     * Convert from the given non-null byte array to the type. A null response here doesn't mean the value is null.
+     * Rather, null should be returned when the conversion can't be performed for the given data type OID. Data type
+     * OIDs are enumerated in {@link DataType}. For most uses, textFormat will always be true and
+     * {@link BuiltIn#assertNotBinary(boolean)} can be called if necessary.
+     */
     @Nullable T convertTo(int dataTypeOid, boolean textFormat, byte[] bytes);
   }
 
+  /**
+   * A "from converter" which is a converter that converts from a Java value to a Postgres value. While there are a
+   * couple of methods here, implementers only need to implement {@link #convertFrom(boolean, Object, BufWriter)}. For
+   * most uses, only the text format needs to be supported.
+   */
   @FunctionalInterface
   interface From<T> {
+    /**
+     * Whether, when serializing as part of SQL, this needs to be quoted. The default implementation returns true for
+     * everything except numeric values with all numeric characters.
+     */
     default boolean mustBeQuotedWhenUsedInSql(T obj) {
       if (!(obj instanceof Number)) return true;
       if (obj instanceof Double) {
@@ -70,11 +111,20 @@ public interface Converters {
       return false;
     }
 
+    /**
+     * What the delimiter is when writing arrays of this type. In Postgres this is always ',' (the default) except for
+     * the geometric "box" type.
+     */
     default char arrayDelimiter() { return ','; }
 
+    /**
+     * For the given obj and format, write the serialized form to buf. For most uses, textFormat will always be true and
+     * {@link BuiltIn#assertNotBinary(boolean)} can be called if necessary.
+     */
     void convertFrom(boolean textFormat, T obj, BufWriter buf);
   }
 
+  /** Collection of built-in conversions for all common types */
   class BuiltIn implements Converters {
     @Override
     public double getPriority() { return 0; }
@@ -85,7 +135,9 @@ public interface Converters {
     @Override
     public Map<String, From> loadFromConverters() { return FROM_CONVERTERS; }
 
+    /** Read-only collection of to-converters keyed by class name */
     public static final Map<String, Converters.To> TO_CONVERTERS;
+    /** Read-only collection of from-converters keyed by class name */
     public static final Map<String, Converters.From> FROM_CONVERTERS;
 
     protected static final DateTimeFormatter TIMESTAMP_FORMAT = new DateTimeFormatterBuilder().
@@ -208,6 +260,7 @@ public interface Converters {
       if (!textFormat) throw new UnsupportedOperationException("Binary not supported yet");
     }
 
+    /** Helper to create a from-converter from an item-to-string text-format-only function */
     public static <T> Converters.From<T> convertTextFromItem(Function<T, String> fn) {
       return (textFormat, obj, buf) -> {
         assertNotBinary(textFormat);
@@ -215,6 +268,11 @@ public interface Converters {
       };
     }
 
+    /**
+     * Helper to create a to-converter from a byte-array-to-item text-format-only function. It accepts some data type
+     * OIDs (see {@link DataType}) that are allowed ({@link DataType#UNSPECIFIED} is implied even if not set). Note,
+     * the vararg array might be mutated to make for fast lookup.
+     */
     public static <@Nullable T> Converters.To<T> convertTextBytesToItem(Function<byte[], T> fn, int... dataTypeOids) {
       if (dataTypeOids.length != 1) Arrays.sort(dataTypeOids);
       return (dataTypeOid, textFormat, bytes) -> {
@@ -227,6 +285,10 @@ public interface Converters {
       };
     }
 
+    /**
+     * Shortcut for {@link #convertTextBytesToItem(Function, int...)} that automatically converts from byte array to
+     * string
+     */
     public static <@Nullable T> Converters.To<T> convertTextToItem(Function<String, T> fn, int... dataTypeOids) {
       return convertTextBytesToItem(((Function<byte[], String>) Util::stringFromBytes).andThen(fn), dataTypeOids);
     }

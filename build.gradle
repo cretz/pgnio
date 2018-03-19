@@ -8,6 +8,19 @@ allprojects {
     repositories {
         mavenCentral()
     }
+    javadoc {
+        options.links 'https://docs.oracle.com/javase/8/docs/api/'
+        // TODO: change when https://github.com/gradle/gradle/issues/2354 is fixed
+        options.addStringOption 'Xdoclint:all', '-Xdoclint:-missing'
+        options.memberLevel = JavadocMemberLevel.PUBLIC
+    }
+    task packageJavadoc(type: Jar, dependsOn: 'javadoc') {
+        from javadoc.destinationDir
+        classifier = 'javadoc'
+    }
+    artifacts {
+        archives packageJavadoc
+    }
 }
 
 project(':driver') {
