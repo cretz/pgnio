@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -36,8 +37,9 @@ public abstract class Connection implements AutoCloseable {
 
   protected Connection(Context ctx) { this.ctx = ctx; }
 
+  /** Calls {@link #terminate()} and waits for a response */
   @Override
-  public void close() { terminate(); }
+  public void close() throws ExecutionException, InterruptedException { terminate().get(); }
 
   protected CompletableFuture<Void> sendTerminate() {
     ctx.buf.clear();
@@ -74,7 +76,10 @@ public abstract class Connection implements AutoCloseable {
 
   /** Subscription management for notices on this connection */
   public Subscribable<Subscribable.Notice> notices() { return ctx.noticeSubscribable; }
-  /** Subscription management for notifications on this connection */
+  /**
+   * Subscription management for notifications on this connection. Note, a LISTEN statement is still required in
+   * addition to this call.
+   */
   public Subscribable<Subscribable.Notification> notifications() { return ctx.notificationSubscribable; }
   /** Subscription management for parameter status changes on this connection */
   public Subscribable<Subscribable.ParameterStatus> parameterStatuses() { return ctx.parameterStatusSubscribable; }

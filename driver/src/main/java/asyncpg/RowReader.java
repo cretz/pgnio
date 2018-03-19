@@ -4,17 +4,25 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.*;
 
+/** Reader that translates Postgres values to Java values */
 public class RowReader {
+  /** Read-only set of converters from {@link Converters#loadAllToConverters()} */
   public static final Map<String, Converters.To> DEFAULT_CONVERTERS =
       Collections.unmodifiableMap(Converters.loadAllToConverters());
+  /** Singleton RowReader using only the {@link #DEFAULT_CONVERTERS} */
   public static final RowReader DEFAULT = new RowReader(DEFAULT_CONVERTERS, false);
 
   protected final Map<String, Converters.To> converters;
 
+  /** Shortcut for {@link #RowReader(Map, boolean)} that does prepend defaults */
   public RowReader(Map<String, Converters.To> converterOverrides) {
     this(converterOverrides, true);
   }
 
+  /**
+   * Create a RowReader with the given converters. If prependDefaults is true, defaults are set first and the given
+   * converters override them.
+   */
   public RowReader(Map<String, Converters.To> converters, boolean prependDefaults) {
     Map<String, Converters.To> map;
     if (prependDefaults) {
@@ -27,6 +35,7 @@ public class RowReader {
     this.converters = Collections.unmodifiableMap(map);
   }
 
+  /** Shortcut for {@link #getRaw(QueryMessage.Row, int)} that requires row metadata for name-to-index lookup */
   public byte@Nullable [] getRaw(QueryMessage.Row row, String colName) {
     if (row.meta == null) throw new DriverException.MissingRowMeta();
     QueryMessage.RowMeta.Column col = row.meta.columnsByName.get(colName.toLowerCase());
@@ -34,12 +43,17 @@ public class RowReader {
     return row.raw[col.index];
   }
 
+  /**
+   * Get the raw byte array from the given row for the column index. Shortcut to accessing {@link QueryMessage.Row#raw}
+   * directly.
+   */
   public byte@Nullable [] getRaw(QueryMessage.Row row, int colIndex) {
     if (colIndex < 0 || colIndex > row.raw.length)
       throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
     return row.raw[colIndex];
   }
 
+  /** Shortcut for {@link #get(QueryMessage.Row, int, Class)} that requires row metadata for name-to-index lookup */
   public <T> @Nullable T get(QueryMessage.Row row, String colName, Class<T> typ) {
     if (row.meta == null) throw new DriverException.MissingRowMeta();
     QueryMessage.RowMeta.Column col = row.meta.columnsByName.get(colName.toLowerCase());
@@ -47,6 +61,10 @@ public class RowReader {
     return get(col, row.raw[col.index], typ);
   }
 
+  /**
+   * Get the row value from the column index and use the RowReader's converters to convert to the given type. This
+   * defers to {@link #get(QueryMessage.RowMeta.Column, byte[], Class)}.
+   */
   public <T> @Nullable T get(QueryMessage.Row row, int colIndex, Class<T> typ) {
     if (colIndex < 0 || colIndex > row.raw.length)
       throw new DriverException.ColumnNotPresent("No column at index " + colIndex);
@@ -60,10 +78,18 @@ public class RowReader {
   @SuppressWarnings("unchecked")
   protected <T> Converters.@Nullable To<? extends T> getConverter(Class<T> typ) {
     Converters.To conv = converters.get(typ.getName());
+    // TODO: interfaces?
     if (conv != null || typ.getSuperclass() == null) return conv;
     return (Converters.To<? extends T>) getConverter(typ.getSuperclass());
   }
 
+  /**
+   * Get the column value and use the RowReader's converters to convert to the given type. If a converter is not found
+   * for the exact class, its superclasses (not interfaces) are tried. If no converter is found, an exception is thrown.
+   * Null is returned if the value is null. As a special case, if the type is an array and there are no converters for
+   * it, Postgres array type is assumed and the component type is used. If the type is a map and there are no converters
+   * for it, Postgres hstore type is assumed and a Map with keys and values as strings is returned.
+   */
   @SuppressWarnings("unchecked")
   public <T> @Nullable T get(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
     Converters.To<? extends T> conv = getConverter(typ);
@@ -90,13 +116,17 @@ public class RowReader {
   }
 
   // Creates a fake column of unspecified type
+  /**
+   * Convert the given Postgres string into the given type using
+   * {@link #get(QueryMessage.RowMeta.Column, byte[], Class)} with a fake column set to text format.
+   */
   public <T> @Nullable T get(@Nullable String val, Class<T> typ) {
     return get(new QueryMessage.RowMeta.Column(0, "", 0, (short) 0, DataType.UNSPECIFIED, (short) 0, 0, true),
         val == null ? null : Util.bytesFromString(val), typ);
   }
 
   @SuppressWarnings("unchecked")
-  public <T> @Nullable T getArray(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
+  protected <T> @Nullable T getArray(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes, Class<T> typ) {
     if (bytes == null) return null;
     Converters.BuiltIn.assertNotBinary(col.textFormat);
     char[] chars = Util.charsFromBytes(bytes);
@@ -171,7 +201,7 @@ public class RowReader {
   }
 
   @SuppressWarnings("unchecked")
-  public <K, V> @Nullable Map<K, @Nullable V> getHStore(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes,
+  protected <K, V> @Nullable Map<K, @Nullable V> getHStore(QueryMessage.RowMeta.Column col, byte@Nullable [] bytes,
       Class<K> keyTyp, Class<V> valTyp) {
     if (bytes == null) return null;
     Converters.BuiltIn.assertNotBinary(col.textFormat);

@@ -44,6 +44,11 @@ public class ConnectionResetTest extends DbTestBase {
   }
 
   @Test
+  public void testBoundMaxRowsSuspended() {
+    // TODO
+  }
+
+  @Test
   public void testSomeRowsRead() {
     // TODO
   }

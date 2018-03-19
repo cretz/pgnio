@@ -7,18 +7,25 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+/** Converter from Java types to Postgres values */
 public class ParamWriter {
-  // Keyed by class name
+  /** Read only from-converter set via {@link Converters#loadAllFromConverters()} keyed by class name */
   public static final Map<String, Converters.From> DEFAULT_CONVERTERS =
       Collections.unmodifiableMap(Converters.loadAllFromConverters());
+  /** Singleton ParamWriter holding the {@link #DEFAULT_CONVERTERS} */
   public static final ParamWriter DEFAULT = new ParamWriter(DEFAULT_CONVERTERS, false);
 
   protected final Map<String, Converters.From> converters;
 
+  /** Shortcut for {@link #ParamWriter(Map, boolean)} that prepends defaults */
   public ParamWriter(Map<String, Converters.From> converterOverrides) {
     this(converterOverrides, true);
   }
 
+  /**
+   * Create a new param writer with teh given converters. If prependDefaults is true, those are added before they are
+   * overridden with the given converters.
+   */
   public ParamWriter(Map<String, Converters.From> converters, boolean prependDefaults) {
     Map<String, Converters.From> map;
     if (prependDefaults) {
@@ -50,10 +57,15 @@ public class ParamWriter {
     return (Converters.From<? extends T>) getConverter(typ.getSuperclass(), topLevel);
   }
 
+  /** Shortcut for {@link #write(boolean, Object, BufWriter, boolean)} with asSql as false */
   public void write(boolean textFormat, Object obj, BufWriter buf) {
     write(textFormat, obj, buf, false);
   }
 
+  /**
+   * Convert the given obj to buf. If asSql is true, textFormat must be true and it is written as though it is a SQL
+   * string (e.g. quoted with string escaping).
+   */
   @SuppressWarnings("unchecked")
   public void write(boolean textFormat, Object obj, BufWriter buf, boolean asSql) {
     if (asSql) Converters.BuiltIn.assertNotBinary(textFormat);
@@ -88,6 +100,7 @@ public class ParamWriter {
     if (needsQuote) buf.writeString("\"");
   }
 
+  /** Converter to write Postgres arrays from Java arrays */
   public class ArrayConverter implements Converters.From {
     protected final boolean topLevel;
     protected final char arrayDelimiter;
@@ -116,6 +129,7 @@ public class ParamWriter {
     }
   }
 
+  /** Converter to write Postgres hstores from Java maps */
   public class HStoreConverter implements Converters.From<Map<?, ?>> {
     protected final boolean topLevel;
 

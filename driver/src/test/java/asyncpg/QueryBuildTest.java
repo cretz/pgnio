@@ -73,4 +73,6 @@ public class QueryBuildTest extends DbTestBase {
             thenCompose(conn -> conn.simpleQueryExec("DROP TABLE testReuseBound"))
     );
   }
+
+  // TODO: test execute partial
 }

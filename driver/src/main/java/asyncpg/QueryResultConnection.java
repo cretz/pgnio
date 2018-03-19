@@ -12,6 +12,7 @@ import java.util.logging.Level;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
+/** Connection state to retrieve server responses after a query set is executed */
 public class QueryResultConnection<T extends Connection.Started> extends Connection.Started {
   protected final T prevConn;
   protected int queryCounter;
@@ -27,10 +28,16 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     this.willEndWithDone = willEndWithDone;
   }
 
+  /** True if this set of results is done */
   public boolean isDone() { return doneMessage != null; }
+
+  /**
+   * True if this set of results is done and suspended pending another call to
+   * {@link QueryBuildConnection.Bound#execute(int)}
+   */
   public boolean isSuspended() { return doneMessage instanceof QueryMessage.PortalSuspended; }
 
-  // This consumes bytes from the buf. Result of null means "done"
+  /** Note, this consumes the buf */
   protected QueryMessage handleReadMessage() {
     char typ = (char) ctx.buf.get();
     ctx.buf.position(5);
@@ -123,7 +130,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     }
   }
 
-  // Message is null if already done
+  /** Get/wait for the next message or null if the set of results is done */
   @SuppressWarnings("return.type.incompatible")
   public CompletableFuture<@Nullable QueryMessage> next() {
     if (isDone()) return CompletableFuture.completedFuture(null);
@@ -137,23 +144,23 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
-  // Will return null on "done" or wait...
+  /** Repeatedly call {@link #next()} until the predicate is matched or the it is done (which returns null) */
   @SuppressWarnings("return.type.incompatible")
   public CompletableFuture<@Nullable QueryMessage> next(Predicate<QueryMessage> pred) {
     return next().thenCompose(msg ->
         msg == null || pred.test(msg) ? CompletableFuture.completedFuture(msg) : next(pred));
   }
 
-  // Finds the next message of given type, discarding others. Will end when "done" (returning null) or hang and wait.
+  /** Shortcut for {@link #next(Predicate)} doing instanceof check */
   @SuppressWarnings("unchecked")
   public <U extends @Nullable QueryMessage> CompletableFuture<U> next(Class<U> messageType) {
     return next(messageType::isInstance).thenApply(msg -> (U) msg);
   }
 
-  public CompletableFuture<List<QueryMessage.Row>> collectRows() {
-    return collectRows(Collectors.toList());
-  }
+  /** Shortcut for {@link #collectRows(Collector)} using {@link Collectors#toList()} */
+  public CompletableFuture<List<QueryMessage.Row>> collectRows() { return collectRows(Collectors.toList()); }
 
+  /** Shortcut for {@link #collectRows(Supplier, BiConsumer)} using the collector's supplier and accumulator */
   @SuppressWarnings("unchecked")
   public <R, A> CompletableFuture<R> collectRows(Collector<? super QueryMessage.Row, A, R> collector) {
     return collectRows(collector.supplier(), collector.accumulator()).thenApply(c -> {
@@ -163,6 +170,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
+  /** Creates item from supplier and calls {@link #forEachRow(Consumer)} using the accumulator */
   @SuppressWarnings("return.type.incompatible")
   public <R> CompletableFuture<R> collectRows(Supplier<R> supplier,
       BiConsumer<R, ? super QueryMessage.Row> accumulator) {
@@ -170,12 +178,16 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return forEachRow(row -> accumulator.accept(ret, row)).thenApply(__ -> ret);
   }
 
-  public <R> CompletableFuture<R> reduceRows(R identity, BiFunction<R, ? super QueryMessage.Row, R> accumulator) {
-    AtomicReference<R> ret = new AtomicReference<>(identity);
+  /** Run accumulator on {@link #forEachRow(Consumer)} constantly updating the initial value */
+  public <R> CompletableFuture<R> reduceRows(R initial, BiFunction<R, ? super QueryMessage.Row, R> accumulator) {
+    AtomicReference<R> ret = new AtomicReference<>(initial);
     return forEachRow(row -> ret.set(accumulator.apply(ret.get(), row))).thenApply(__ -> ret.get());
   }
 
-  // Only runs for the rows remaining in the current query. Call again for future queries.
+  /**
+   * Run the consumer for each remaining row in the current query. Call again for successive queries. Internally is just
+   * the synchronous form of {@link #forEachRowAsync(Function)}.
+   */
   public CompletableFuture<Void> forEachRow(Consumer<QueryMessage.Row> fn) {
     return forEachRowAsync(row -> {
       fn.accept(row);
@@ -183,7 +195,10 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
-  // Only runs for the rows remaining in the current query. Call again for future queries.
+  /**
+   * Run the given function for each remaining row in the query. Call again for successive queries. The next item will
+   * not be fetched until the future returned by the previous call to the given function is complete.
+   */
   public CompletableFuture<Void> forEachRowAsync(Function<QueryMessage.Row, CompletableFuture<Void>> fn) {
     return next().thenCompose(msg -> {
       // Keep going until complete, only handling rows
@@ -193,6 +208,12 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
+  /**
+   * Skip all messages until query complete and return the row count (can be rows selected or affected). Call again if
+   * needed for successive queries. Will return null if this ends without a complete message or if it is complete with
+   * a type of query that does not have result count. Essentially a shortcut for calling {@link #next(Class)} for
+   * {@link QueryMessage.Complete}.
+   */
   public CompletableFuture<@Nullable Long> collectRowCount() {
     return next(QueryMessage.Complete.class).thenApply(complete -> complete == null ? null : complete.getRowCount());
   }
@@ -200,6 +221,11 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   @Override
   protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
 
+  /**
+   * Consume and ignore all remaining messages until the end of all queries for this query set is reached. Note, in some
+   * cases such as a {@link QueryBuildConnection#flush()}, this will return immediately because it is known there is no
+   * clear end-of-query-set marker. This returns the previous connection state.
+   */
   public CompletableFuture<T> done() {
     // Send/wait for copy completes if necessary
     if (copyInWaitingForComplete || copyOutWaitingForComplete)
@@ -213,30 +239,42 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     });
   }
 
+  /** {@link #collectRows(Supplier, BiConsumer)} + {@link #done()} */
   public CompletableFuture<List<QueryMessage.Row>> collectRowsAndDone() {
     return collectRows().thenCompose(rows -> done().thenApply(__ -> rows));
   }
 
+  /** {@link #collectRowCount()} + {@link #done()} */
   @SuppressWarnings("return.type.incompatible")
   public CompletableFuture<@Nullable Long> collectRowCountAndDone() {
     return collectRowCount().thenCompose(rowCount -> done().thenApply(__ -> rowCount));
   }
 
+  /** Shortcut for {@link #copyIn(boolean)} that waits for begin acknowledgement */
   public CompletableFuture<Copy<T>> copyIn() { return copyIn(true); }
+
+  /** Begin copy-in connection state, waiting for the copy-in-begin acknowledgement if param set to true */
   public CompletableFuture<Copy<T>> copyIn(boolean waitForBegin) {
     return copy(QueryMessage.CopyBegin.Direction.IN, waitForBegin);
   }
 
+  /** Shortcut for {@link #copyOut(boolean)} that waits for begin acknowledgement */
   public CompletableFuture<Copy<T>> copyOut() { return copyOut(true); }
+
+  /** Begin copy-out connection state, waiting for the copy-out-begin acknowledgement if param set to true */
   public CompletableFuture<Copy<T>> copyOut(boolean waitForBegin) {
     return copy(QueryMessage.CopyBegin.Direction.OUT, waitForBegin);
   }
 
+  /** Shortcut for {@link #copyBoth(boolean)} that waits for begin acknowledgement */
   public CompletableFuture<Copy<T>> copyBoth() { return copyBoth(true); }
+
+  /** Begin copy-both connection state, waiting for the copy-both-begin acknowledgement if param set to true */
   public CompletableFuture<Copy<T>> copyBoth(boolean waitForBegin) {
     return copy(QueryMessage.CopyBegin.Direction.BOTH, waitForBegin);
   }
 
+  /** Begin copying in the given direction, optionally waiting for server begin acknowledgement */
   public CompletableFuture<Copy<T>> copy(QueryMessage.CopyBegin.Direction direction, boolean waitForBegin) {
     CompletableFuture<Void> ready =
         !waitForBegin ? CompletableFuture.completedFuture(null) : next(QueryMessage.CopyBegin.class).thenApply(msg -> {
@@ -257,6 +295,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return writeFrontendMessage();
   }
 
+  /** Write raw bytes to server as part of COPY */
   public CompletableFuture<Void> copyInWrite(byte[]... data) {
     CompletableFuture<Void> ret = CompletableFuture.completedFuture(null);
     for (byte[] bytes : data) ret = ret.thenCompose(__ -> sendCopyData(bytes));
@@ -270,6 +309,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return writeFrontendMessage().thenRun(() -> copyInWaitingForComplete = false);
   }
 
+  /** Send copy-in-done to server as part of COPY */
   public CompletableFuture<Void> copyInComplete() { return sendCopyDone(); }
 
   protected CompletableFuture<Void> sendCopyFail(String message) {
@@ -279,11 +319,15 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     return writeFrontendMessage().thenRun(() -> copyInWaitingForComplete = false);
   }
 
+  /** Send copy-in-fail to server as part of COPY */
   public CompletableFuture<Void> copyInFail(String message) { return sendCopyFail(message); }
 
+  /** Connection state for copying data to/from the server */
   public static class Copy<T extends Connection.Started> extends Connection.Started {
     protected final QueryResultConnection<T> prevConn;
+    /** Whether the server is accepting copy data from the client */
     public final boolean copyIn;
+    /** Whether the client is accepting copy data from the server */
     public final boolean copyOut;
     protected boolean copyInComplete;
     protected boolean copyOutComplete;
@@ -297,6 +341,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
 
     protected void assertCopyIn() { if (!copyIn) throw new IllegalStateException("Not in copy-in mode"); }
 
+    /** Returns true if copy-in has been marked complete by this client. Fails if not copy-in mode. */
     public boolean isCopyInComplete() {
       assertCopyIn();
       return copyInComplete;
@@ -306,11 +351,13 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       if (isCopyInComplete()) throw new IllegalStateException("Copy-in already completed");
     }
 
+    /** Send data to server as part of copy-in. Fails if not copy-in mode. */
     public CompletableFuture<Copy<T>> sendData(byte[] bytes) {
       assertNotCopyInComplete();
       return prevConn.copyInWrite(bytes).thenApply(__ -> this);
     }
 
+    /** Send copy-in complete and failed to server as part of copy-in. Fails if not copy-in mode. */
     public CompletableFuture<Copy<T>> sendFail(String message) {
       assertNotCopyInComplete();
       return prevConn.copyInFail(message).thenApply(__ -> {
@@ -319,6 +366,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       });
     }
 
+    /** Send copy-in complete to server as part of copy-in. Fails if not copy-in mode. */
     public CompletableFuture<Copy<T>> sendComplete() {
       assertNotCopyInComplete();
       return prevConn.copyInComplete().thenApply(__ -> {
@@ -329,12 +377,13 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
 
     protected void assertCopyOut() { if (!copyOut) throw new IllegalStateException("Not in copy-out mode"); }
 
+    /** Returns true of copy-out is marked complete by server. Fails if not copy-out mode. */
     public boolean isCopyOutComplete() {
       assertCopyOut();
       return copyOutComplete;
     }
 
-    // Returns null if done
+    /** Receive raw bytes from server during copy-out or null if done. Fails if not copy-out mode. */
     public CompletableFuture<byte@Nullable []> receiveData() {
       if (isCopyOutComplete()) return CompletableFuture.completedFuture(null);
       return prevConn.next(msg -> msg instanceof QueryMessage.CopyData || msg instanceof QueryMessage.CopyDone).
@@ -345,6 +394,10 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
           });
     }
 
+    /**
+     * Repeatedly call {@link #receiveData()} and pass to consumer until done. Fails if not copy-out mode. Synchronous
+     * equivalent of {@link #receiveEachDataAsync(Function)}.
+     */
     public CompletableFuture<Void> receiveEachData(Consumer<byte[]> fn) {
       return receiveEachDataAsync(data -> {
         fn.accept(data);
@@ -352,6 +405,10 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       });
     }
 
+    /**
+     * Repeatedly call {@link #receiveData()} and pass to consumer until done. Fails if not copy-out mode. Next call is
+     * not made until previous call's future is complete.
+     */
     public CompletableFuture<Void> receiveEachDataAsync(Function<byte[], CompletableFuture<Void>> fn) {
       return receiveData().thenCompose(data -> {
         if (data == null) return CompletableFuture.completedFuture(null);
@@ -359,12 +416,17 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       });
     }
 
+    /** Essentially a "drain" that reads the copy-out messages until done. Fails if not copy-out-mode. */
     public CompletableFuture<Copy<T>> receiveIgnoreUntilComplete() {
       if (isCopyOutComplete()) return CompletableFuture.completedFuture(this);
       return receiveData().thenCompose(data ->
           data == null ? CompletableFuture.completedFuture(this) : receiveIgnoreUntilComplete());
     }
 
+    /**
+     * Complete the copy in either direction. If copy-in mode, sends copy done. If copy-out mode, calls
+     * {@link #receiveIgnoreUntilComplete()}.
+     */
     public CompletableFuture<QueryResultConnection<T>> complete() {
       // Send my complete if not sent
       CompletableFuture<Copy<T>> sentComplete =
@@ -378,6 +440,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     @Override
     protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
 
+    /** {@link #complete()} + {@link QueryResultConnection#done()} */
     public CompletableFuture<T> done() { return complete().thenCompose(QueryResultConnection::done); }
   }
 }

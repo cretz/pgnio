@@ -9,8 +9,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.BiConsumer;
 
+/** Utilities used withing the library that may have use for others */
 public class Util {
   @SuppressWarnings("type.argument.type.incompatible")
   private static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
@@ -25,50 +25,56 @@ public class Util {
 
   // TODO: there's room for wins on some of these to reuse char/byte buffers for decoding
 
-  public static String stringFromBytes(byte[] bytes) {
-    return stringFromByteBuffer(ByteBuffer.wrap(bytes));
-  }
-
-  public static String stringFromByteBuffer(ByteBuffer bytes) {
-    return charBufferFromByteBuffer(bytes).toString();
-  }
-
+  /** Shortcut for {@link #charBufferFromByteBuffer(ByteBuffer)} */
+  public static String stringFromBytes(byte[] bytes) { return stringFromByteBuffer(ByteBuffer.wrap(bytes)); }
+  /** Shortcut for {@link #charBufferFromByteBuffer(ByteBuffer)} */
+  public static String stringFromByteBuffer(ByteBuffer bytes) { return charBufferFromByteBuffer(bytes).toString(); }
+  /** Shortcut for {@link #charBufferFromByteBuffer(ByteBuffer)} */
   public static char[] charsFromBytes(byte[] bytes) {
     CharBuffer buf = charBufferFromByteBuffer(ByteBuffer.wrap(bytes));
     if (buf.limit() == buf.capacity()) return buf.array();
     return Arrays.copyOf(buf.array(), buf.limit());
   }
-
+  /**
+   * Get characters from the given byte buffer using UTF-8 decoding. Unlike {@link String#String(byte[], Charset)} and
+   * others, this does error on malformed input or unmappable characters.
+   */
   public static CharBuffer charBufferFromByteBuffer(ByteBuffer bytes) {
     try {
       return threadLocalStringDecoder.get().decode(bytes);
     } catch (CharacterCodingException e) { throw new RuntimeException(e); }
   }
 
-  public static byte[] bytesFromString(String str) {
-    return bytesFromByteBuffer(byteBufferFromString(str));
-  }
-
+  /** Shortcut for {@link #byteBufferFromCharBuffer(CharBuffer)} */
+  public static byte[] bytesFromString(String str) { return bytesFromByteBuffer(byteBufferFromString(str)); }
+  /** Shortcut for {@link #byteBufferFromCharBuffer(CharBuffer)} */
   public static byte[] bytesFromCharBuffer(CharBuffer buf) {
     return bytesFromByteBuffer(byteBufferFromCharBuffer(buf));
   }
-
-  // Assumes buf will never be used again
+  /**
+   * Shortcut for {@link #byteBufferFromCharBuffer(CharBuffer)}. Note, this may return the byte buffer's backing array
+   * so it is assumed the buf is never used again.
+   */
   protected static byte[] bytesFromByteBuffer(ByteBuffer buf) {
     if (buf.limit() == buf.capacity()) return buf.array();
     return Arrays.copyOf(buf.array(), buf.limit());
   }
-
-  public static ByteBuffer byteBufferFromString(String str) {
-    return byteBufferFromCharBuffer(CharBuffer.wrap(str));
-  }
-
+  /** Shortcut for {@link #byteBufferFromCharBuffer(CharBuffer)} */
+  public static ByteBuffer byteBufferFromString(String str) { return byteBufferFromCharBuffer(CharBuffer.wrap(str)); }
+  /**
+   * Get bytes from the given char buffer. Unlike {@link String#getBytes(Charset)} and others, this does error on
+   * malformed input or unmappable characters.
+   */
   public static ByteBuffer byteBufferFromCharBuffer(CharBuffer buf) {
     try {
       return threadLocalStringEncoder.get().encode(buf);
     } catch (CharacterCodingException e) { throw new RuntimeException(e); }
   }
 
+  /**
+   * Turn a not-yet-done completable future to a completion handler. This populates the future's complete or exception
+   * based on the handler's complete or exception.
+   */
   public static <V> CompletionHandler<V, Void> handlerFromFuture(CompletableFuture<V> fut) {
     return new CompletionHandler<V, Void>() {
       @Override
@@ -79,25 +85,11 @@ public class Util {
     };
   }
 
-  public static <V, A> CompletionHandler<V, A> successHandler(BiConsumer<V, A> fn) {
-    return new CompletionHandler<V, A>() {
-      @Override
-      public void completed(V result, A attachment) { fn.accept(result, attachment); }
-
-      @Override
-      public void failed(Throwable exc, A attachment) {
-        if (exc instanceof RuntimeException) throw (RuntimeException) exc;
-        throw new RuntimeException(exc);
-      }
-    };
-  }
-
   static final char[] hexArray = "0123456789abcdef".toCharArray();
 
-  public static String byteToHex(byte b) {
-    return new String(new char[] { hexArray[b >>> 4], hexArray[b & 0x0F] });
-  }
-
+  /** Convert a single byte to a 2-char hex string */
+  public static String byteToHex(byte b) { return new String(new char[] { hexArray[b >>> 4], hexArray[b & 0x0F] }); }
+  /** Convert a byte array to a hex string */
   public static String bytesToHex(byte[] bytes) {
     char[] hexChars = new char[bytes.length * 2];
     for (int j = 0; j < bytes.length; j++) {
@@ -108,10 +100,11 @@ public class Util {
     return new String(hexChars);
   }
 
+  /** Convert a two-char hex string to a single byte */
   public static byte hexToByte(String hex) {
     return (byte) ((Character.digit(hex.charAt(0), 16) << 4) + Character.digit(hex.charAt(1), 16));
   }
-
+  /** Convert a hex string to a byte array */
   public static byte[] hexToBytes(String hex) {
     int len = hex.length();
     byte[] data = new byte[len / 2];
@@ -120,6 +113,7 @@ public class Util {
     return data;
   }
 
+  /** Apply MD5 to the given byte arrays and then make the result a hex-string in bytes */
   public static byte[] md5Hex(MessageDigest md5, byte[]... byteArrays) {
     for (byte[] byteArray : byteArrays) md5.update(byteArray);
     byte[] digest = md5.digest();
@@ -132,6 +126,7 @@ public class Util {
     return ret;
   }
 
+  /** Non-regex form of {@link String#split(String)} */
   public static List<String> splitByChar(String str, char chr) {
     List<String> ret = new ArrayList<>();
     int index = 0;
@@ -147,6 +142,7 @@ public class Util {
     return ret;
   }
 
+  /** Given a primitive class, get the boxed version */
   public static Class boxedClassFromPrimitive(Class primitive) {
     if (primitive == Void.TYPE) return Void.class;
     if (primitive == Boolean.TYPE) return Boolean.class;
@@ -160,6 +156,7 @@ public class Util {
     throw new IllegalArgumentException("Unrecognized primitive class: " + primitive);
   }
 
+  /** Given an array component type, return an array type of it */
   public static Class arrayClassOf(Class componentType) {
     if (componentType == boolean.class) return boolean[].class;
     if (componentType == byte.class) return byte[].class;

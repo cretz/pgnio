@@ -11,21 +11,30 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Subscription management for out-of-band messages that may occur. This is not thread safe so calls here should only be
+ * made within the context of the connection.
+ */
 public class Subscribable<T> {
   // Purposefully not thread safe
   protected final Set<Function<T, CompletableFuture<Void>>> subscriptions = new LinkedHashSet<>();
 
+  /**
+   * Subscribe to messages of the generic type. Connection work will not continue until resulting future is complete.
+   * The given function is also returned and can be used for {@link #unsubscribe(Function)}.
+   */
   public Function<T, CompletableFuture<Void>> subscribe(Function<T, CompletableFuture<Void>> cb) {
     if (!subscriptions.add(cb)) throw new IllegalArgumentException("Function already subscribed");
     return cb;
   }
 
-  public boolean unsubscribe(Function<T, CompletableFuture<Void>> cb) {
-    return subscriptions.remove(cb);
-  }
+  /** Remove the given function. Returns true if removed, false if it was never there. */
+  public boolean unsubscribe(Function<T, CompletableFuture<Void>> cb) { return subscriptions.remove(cb); }
 
+  /** Clear all subscriptions */
   public void unsubscribeAll() { subscriptions.clear(); }
 
+  /** Publish the given item to any subscribers, returning a future that is completed when they all are */
   public CompletableFuture<Void> publish(T item) {
     // We choose to go one at a time instead of allOf here because of the synchronous reqs of the Connection
     CompletableFuture<Void> ret = CompletableFuture.completedFuture(null);
@@ -33,13 +42,21 @@ public class Subscribable<T> {
     return ret;
   }
 
+  /** Representation of a Postgres notice */
   public static class Notice {
+    /**
+     * Collection of fields for this notice. It is not necessarily read-only but callers should not mutate. In many
+     * cases, it is easier to derive the key to access a field by using a {@link Field#key} of a known field.
+     */
     public final Map<Byte, String> fields;
 
+    /** Create a notice with the given fields */
     public Notice(Map<Byte, String> fields) { this.fields = fields; }
 
+    /** The severity of the notice, localized */
     public String getLocalizedSeverity() { return fields.getOrDefault(Field.LOCALIZED_SEVERITY.key, "<no severity>"); }
 
+    /** The severity of the notice or {@link Severity#UNKNOWN} */
     public Severity getSeverity() {
       String severity = fields.get(Field.SEVERITY.key);
       if (severity == null) severity = getLocalizedSeverity();
@@ -48,10 +65,13 @@ public class Subscribable<T> {
       } catch (IllegalArgumentException e) { return Severity.UNKNOWN; }
     }
 
+    /** The notice code */
     public String getCode() { return fields.getOrDefault(Field.CODE.key, "<no code>"); }
 
+    /** The notice message */
     public String getMessage() { return fields.getOrDefault(Field.MESSAGE.key, "<no message>"); }
 
+    /** Log the notice to the given logger */
     public void log(Logger log) { log(log, null); }
 
     protected void log(Logger log, Connection.@Nullable Context ctx) {
@@ -84,9 +104,11 @@ public class Subscribable<T> {
     @Override
     public String toString() { return getLocalizedSeverity() + ": " + getMessage() + " [" + getCode() + "]"; }
 
+    /** Known severities of Postgres notice/error messages */
     public enum Severity {
       ERROR, FATAL, PANIC, WARNING, NOTICE, DEBUG, INFO, LOG, UNKNOWN;
 
+      /** Suggested translation from severity to Java logging level */
       public Level toLogLevel() {
         switch (this) {
           case FATAL:
@@ -108,6 +130,7 @@ public class Subscribable<T> {
       }
     }
 
+    /** Known notice/error fields */
     public enum Field {
       LOCALIZED_SEVERITY('S'),
       SEVERITY('V'),
@@ -128,15 +151,20 @@ public class Subscribable<T> {
       LINE('L'),
       ROUTINE('R');
 
+      /** The key representing the field */
       public final Byte key;
 
       Field(char key) { this.key = (byte) key; }
     }
   }
 
+  /** Representation of a Postgres notification */
   public static class Notification {
+    /** The process ID of the notifying backend process */
     public final int processId;
+    /** The notification's channel */
     public final String channel;
+    /** The notification contents */
     public final String payload;
 
     public Notification(int processId, String channel, String payload) {
@@ -162,8 +190,11 @@ public class Subscribable<T> {
     public String toString() { return "[process=" + processId + ",channel=" + channel + ",payload=" + payload + "]"; }
   }
 
+  /** Representation of a Postgres parameter status change */
   public static class ParameterStatus {
+    /** The name of the parameter */
     public final String parameter;
+    /** The new parameter value */
     public final String value;
 
     public ParameterStatus(String parameter, String value) {
