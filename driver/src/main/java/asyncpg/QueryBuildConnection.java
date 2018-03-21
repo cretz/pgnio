@@ -77,8 +77,10 @@ public abstract class QueryBuildConnection
 
   /** Connection state when statements have been parsed and can be described, bound, etc */
   public static class Prepared<T extends QueryReadyConnection<T>> extends QueryBuildConnection<T, Prepared<T>> {
+    /** Format that can be used in {@link #bindEx(boolean[], boolean[], Object...)} for all text format */
     public static final boolean[] FORMAT_TEXT_ALL = new boolean[0];
-    protected static final boolean[] FORMAT_BINARY_ALL = new boolean[] { false };
+    /** Format that can be used in {@link #bindEx(boolean[], boolean[], Object...)} for all binary format */
+    public static final boolean[] FORMAT_BINARY_ALL = new boolean[] { false };
     /** The statement name, or an empty string for non-reusable, unnamed statement */
     public final String statementName;
 

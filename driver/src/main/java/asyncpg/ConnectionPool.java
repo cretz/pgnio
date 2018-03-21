@@ -9,11 +9,20 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * A simple connection pool. As connections are borrowed or returned, they are evicted and replaced by new connections
+ * if they are no longer open. Otherwise, connections are reset via {@link Connection.Started#fullReset()} before placed
+ * back into the pool. Developers are encouraged to use {@link #withConnection(Function)} and to return a future which
+ * will guarantee the connection is returned to the pool even on error. If developers use {@link #borrowConnection()},
+ * they must call {@link #returnConnection(QueryReadyConnection.AutoCommit)} even on error and even if it's will a null
+ * value. Not doing so will prevent the pool from maintaining its fixed size.
+ */
 public class ConnectionPool {
   protected static final Logger log = Logger.getLogger(ConnectionPool.class.getName());
   protected final Config config;
   protected final BlockingQueue<CompletableFuture<QueryReadyConnection.AutoCommit>> connections;
 
+  /** Create a connection pool for the given connection with a fixed size of {@link Config#poolSize} */
   @SuppressWarnings("initialization")
   public ConnectionPool(Config config) {
     this.config = config;
@@ -26,7 +35,13 @@ public class ConnectionPool {
     }
   }
 
-  // Must call returnConnection, even if this fails
+  /**
+   * Borrow a connection for use. If a connection is not available, this blocks until one is made available. This may
+   * internally create a new connection if the one that would be returned is no longer open. Developers who call this
+   * directly must make sure to call {@link #returnConnection(QueryReadyConnection.AutoCommit)} when they are through
+   * with the connection (or pass null if they don't want the connection in the pool anymore) even on failure. For
+   * simplicity, developers are encouraged to instead use {@link #withConnection(Function)} when they can.
+   */
   public CompletableFuture<QueryReadyConnection.AutoCommit> borrowConnection() {
     CompletableFuture<QueryReadyConnection.AutoCommit> fut;
     try {
@@ -39,7 +54,11 @@ public class ConnectionPool {
     return config.connector.apply(config);
   }
 
-  // if it's null, we'll create a new one
+  /**
+   * Return a connection to the pool. If the given connection is null or not open, a new connection is added to the pool
+   * instead. This should never block so long as {@link #borrowConnection()} was previously called. For simplicity,
+   * developers are encouraged to use {@link #withConnection(Function)} instead.
+   */
   @SuppressWarnings("dereference.of.nullable")
   public void returnConnection(QueryReadyConnection.@Nullable AutoCommit conn) {
     try {
@@ -58,14 +77,32 @@ public class ConnectionPool {
     } catch (InterruptedException e) { throw new RuntimeException(e); }
   }
 
+  /**
+   * Invoke the function with a borrowed connection. The result of the function must be a future and the connection is
+   * guaranteed to be returned to the pool on completion of the resulting future. The result of this method is the
+   * future from the callback (with the return-to-pool step added). This is a simpler alternative to
+   * {@link #borrowConnection()} + {@link #returnConnection(QueryReadyConnection.AutoCommit)} which does things like
+   * make sure the connection is returned even on error. Note, if an error happens directly within the callback instead
+   * of returned as an errored future, it will be wrapped and turned into an errored future.
+   */
   public <T> CompletableFuture<T> withConnection(Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
     return borrowConnection().
         // Handle exception early even on borrow
         whenComplete((__, ex) -> { if (ex != null) returnConnection(null); }).
         // Otherwise release no matter what happens in fn
-        thenCompose(conn -> fn.apply(conn).whenComplete((__, ex) -> {
-          if (ex != null) log.log(Level.WARNING, "Ignoring error when returning connection to pool", ex);
-          returnConnection(conn);
-        }));
+        thenCompose(conn -> {
+          // Make the call, wrapping even direct exceptions into the future
+          CompletableFuture<T> fut;
+          try {
+            fut = fn.apply(conn);
+          } catch (Throwable e) {
+            fut = new CompletableFuture<>();
+            fut.completeExceptionally(e);
+          }
+          return fut.whenComplete((__, ex) -> {
+            if (ex != null) log.log(Level.WARNING, "Ignoring error when returning connection to pool", ex);
+            returnConnection(conn);
+          });
+        });
   }
 }
