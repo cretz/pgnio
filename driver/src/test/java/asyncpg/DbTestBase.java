@@ -4,6 +4,7 @@ import org.junit.BeforeClass;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 public abstract class DbTestBase extends TestBase {
@@ -20,7 +21,7 @@ public abstract class DbTestBase extends TestBase {
 
   protected static Config newDefaultConfig() {
     return new Config().hostname("localhost").port(5433).
-        database("asyncpg_test").username("some_user").password("some_pass");
+        database("asyncpg_test").username("some_user").password("some_pass").defaultTimeout(10, TimeUnit.SECONDS);
   }
 
   protected <T> T withConnectionSync(Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {

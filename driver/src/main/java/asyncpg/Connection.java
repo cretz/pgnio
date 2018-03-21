@@ -49,7 +49,17 @@ public abstract class Connection implements AutoCloseable {
   }
 
   /** Send terminate and close the connection */
-  public CompletableFuture<Void> terminate() { return sendTerminate().whenComplete((__, ___) -> ctx.io.close()); }
+  public CompletableFuture<Void> terminate() {
+    return sendTerminate().handle((__, termEx) ->
+      ctx.io.close().handle((___, closeEx) -> {
+        Throwable ex = termEx != null ? termEx : closeEx;
+        if (ex == null) return (Void) null;
+        if (termEx != null && closeEx != null) log.log(Level.WARNING, "Failed closing", closeEx);
+        if (ex instanceof RuntimeException) throw (RuntimeException) ex;
+        throw new RuntimeException(ex);
+      })
+    ).thenCompose(Function.identity());
+  }
 
   protected <@Nullable T> CompletableFuture<T> terminate(T ret, @Nullable Throwable ex) {
     return terminate().handle((__, termEx) -> {
@@ -112,6 +122,9 @@ public abstract class Connection implements AutoCloseable {
   }
 
   protected CompletableFuture<Void> writeFrontendMessage(long timeout, TimeUnit timeoutUnit) {
+    if (log.isLoggable(Level.FINER))
+      log.log(Level.FINER, "{0} Writing message with first char {1} and size {2}",
+          new Object[] { ctx, (char) ctx.buf.get(0), ctx.buf.limit() });
     return ctx.io.writeFull(ctx.buf, timeout, timeoutUnit).thenRun(() -> ctx.buf.clear());
   }
 
@@ -140,8 +153,14 @@ public abstract class Connection implements AutoCloseable {
         }
         Subscribable.Notice notice = new Subscribable.Notice(fields);
         // Throw on error, send to subscriber on normal notice
-        if (typ == 'E') throw new DriverException.FromServer(notice);
-        return notices().publish(notice);
+        if (typ == 'N') return notices().publish(notice);
+        // Sometimes we ignore errors like during connection reset
+        DriverException.FromServer ex = new DriverException.FromServer(notice);
+        if (ctx.ignoreErrors) {
+          log.log(Level.FINE, "Ignoring error", ex);
+          return CompletableFuture.completedFuture(null);
+        }
+        throw ex;
       // ParameterStatus
       case 'S':
         // Handle status after skipping length
@@ -194,6 +213,7 @@ public abstract class Connection implements AutoCloseable {
     protected @Nullable Integer secretKey;
     protected final Map<String, String> runtimeParameters = new HashMap<>();
     protected QueryReadyConnection.@Nullable TransactionStatus lastTransactionStatus;
+    protected boolean ignoreErrors;
 
     @SuppressWarnings("initialization")
     public Context(Config config, ConnectionIo io) {
@@ -413,7 +433,10 @@ public abstract class Connection implements AutoCloseable {
      * the state it is currently in. Among other uses, this is used by the connection pool to reset the connection.
      */
     public CompletableFuture<QueryReadyConnection.AutoCommit> fullReset() {
-      return controlPassedTo != null ? controlPassedTo.fullReset() : reset();
+      ctx.ignoreErrors = true;
+      CompletableFuture<QueryReadyConnection.AutoCommit> fut =
+          controlPassedTo != null ? controlPassedTo.fullReset() : reset();
+      return fut.whenComplete((__, ___) -> ctx.ignoreErrors = false);
     }
   }
 }

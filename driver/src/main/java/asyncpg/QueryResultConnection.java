@@ -142,7 +142,7 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
         lastRowMeta = null;
       }
       if (msg instanceof QueryMessage.PortalSuspended) suspended = true;
-      if (msg.isQueryingDoneMessage()) done = true;
+      if (msg instanceof QueryMessage.ReadyForQuery) done = true;
     });
   }
 
@@ -221,7 +221,11 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
   }
 
   @Override
-  protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
+  protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() {
+    assertValid();
+    log.log(Level.FINER, "Resetting from query result");
+    return done().thenCompose(Started::reset);
+  }
 
   /**
    * Consume and ignore all remaining messages until the end of all queries for this query set is reached. Note, in some
@@ -234,10 +238,11 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
       return new Copy<>(ctx, this, copyInWaitingForComplete, copyOutWaitingForComplete).done();
 
     if (!willEndWithDone) return CompletableFuture.completedFuture(prevConn);
-    // Consume all until done
-    return next(__ -> false).thenApply(__ -> {
+    // Consume a single one and try again if not done
+    return next().thenCompose(__ -> {
+      if (!isDone()) return done();
       prevConn.resumeControl();
-      return prevConn;
+      return CompletableFuture.completedFuture(prevConn);
     });
   }
 
@@ -440,7 +445,11 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     }
 
     @Override
-    protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() { return done().thenCompose(Started::reset); }
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() {
+      assertValid();
+      log.log(Level.FINER, "Resetting from copy");
+      return done().thenCompose(Started::reset);
+    }
 
     /** {@link #complete()} + {@link QueryResultConnection#done()} */
     public CompletableFuture<T> done() { return complete().thenCompose(QueryResultConnection::done); }

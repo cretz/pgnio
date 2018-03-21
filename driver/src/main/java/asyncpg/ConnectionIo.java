@@ -106,7 +106,9 @@ public interface ConnectionIo {
         }
 
         @Override
-        public void failed(Throwable exc, ByteBuffer buf) { ret.completeExceptionally(exc); }
+        public void failed(Throwable exc, ByteBuffer buf) {
+          ret.completeExceptionally(exc);
+        }
       });
       return ret;
     }

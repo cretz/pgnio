@@ -136,7 +136,11 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
     }
 
     @Override
-    protected CompletableFuture<AutoCommit> reset() { return CompletableFuture.completedFuture(this); }
+    protected CompletableFuture<AutoCommit> reset() {
+      assertValid();
+      log.log(Level.FINER, "Resetting from auto commit");
+      return CompletableFuture.completedFuture(this);
+    }
   }
 
   /**
@@ -171,7 +175,7 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
       });
     }
 
-    /** Rollback this transaction and return to previous state. If nested, this just rollsback to the savepoint. */
+    /** Rollback this transaction and return to previous state. If nested, this just rolls back to the savepoint. */
     public CompletableFuture<T> rollbackTransaction() {
       assertValid();
       String query = depth == 0 ? "ROLLBACK" : "ROLLBACK TO SAVEPOINT asyncpg_sp_" + depth;
@@ -187,6 +191,10 @@ public abstract class QueryReadyConnection<SELF extends QueryReadyConnection<SEL
     }
 
     @Override
-    protected CompletableFuture<AutoCommit> reset() { return rollbackTransaction().thenCompose(Started::reset); }
+    protected CompletableFuture<AutoCommit> reset() {
+      assertValid();
+      log.log(Level.FINER, "Resetting from in transaction");
+      return rollbackTransaction().thenCompose(Started::reset);
+    }
   }
 }

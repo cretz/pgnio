@@ -18,7 +18,6 @@ public abstract class QueryMessage {
   protected QueryMessage(int queryIndex) { this.queryIndex = queryIndex; }
 
   protected boolean isQueryEndingMessage() { return false; }
-  protected boolean isQueryingDoneMessage() { return false; }
 
   /**
    * Sent when {@link QueryBuildConnection.Bound#execute(int)} is used and it has finished reading the partial result
@@ -33,9 +32,6 @@ public abstract class QueryMessage {
   /** Send as the final statement after simple or prepared queries have all completed */
   public static class ReadyForQuery extends QueryMessage {
     public ReadyForQuery(int queryIndex) { super(queryIndex); }
-
-    @Override
-    protected boolean isQueryingDoneMessage() { return true; }
   }
 
   /** Sent when a single query has completed (so will occur multiple times for multiple queries) */

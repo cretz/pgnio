@@ -3,6 +3,7 @@ package asyncpg;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 
 /** Base connection state for advanced query building using prepared and bound statements */
 public abstract class QueryBuildConnection
@@ -60,12 +61,18 @@ public abstract class QueryBuildConnection
 
   @Override
   protected CompletableFuture<QueryReadyConnection.AutoCommit> reset() {
+    assertValid();
+    log.log(Level.FINER, "Resetting from query build");
     return done().thenCompose(QueryResultConnection::reset);
   }
 
   /** Complete the sending of advanced query building commands and tell Postgres to start sending responses */
   public CompletableFuture<QueryResultConnection<T>> done() {
-    return sendSync().thenApply(__ -> new QueryResultConnection<>(ctx, prevConn, true));
+    return sendSync().thenApply(__ -> {
+      // We have to resume control and then re-pass it here
+      prevConn.resumeControl();
+      return prevConn.passControlTo(new QueryResultConnection<>(ctx, prevConn, true));
+    });
   }
 
   /** Connection state when statements have been parsed and can be described, bound, etc */

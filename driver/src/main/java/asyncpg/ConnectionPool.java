@@ -6,8 +6,11 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class ConnectionPool {
+  protected static final Logger log = Logger.getLogger(ConnectionPool.class.getName());
   protected final Config config;
   protected final BlockingQueue<CompletableFuture<QueryReadyConnection.AutoCommit>> connections;
 
@@ -60,6 +63,9 @@ public class ConnectionPool {
         // Handle exception early even on borrow
         whenComplete((__, ex) -> { if (ex != null) returnConnection(null); }).
         // Otherwise release no matter what happens in fn
-        thenCompose(conn -> fn.apply(conn).whenComplete((__, ___) -> returnConnection(conn)));
+        thenCompose(conn -> fn.apply(conn).whenComplete((__, ex) -> {
+          if (ex != null) log.log(Level.WARNING, "Ignoring error when returning connection to pool", ex);
+          returnConnection(conn);
+        }));
   }
 }

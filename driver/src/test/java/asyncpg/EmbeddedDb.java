@@ -8,7 +8,6 @@ import de.flapdoodle.embed.process.runtime.ICommandLinePostProcessor;
 import de.flapdoodle.embed.process.store.IArtifactStore;
 import ru.yandex.qatools.embed.postgresql.EmbeddedPostgres;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,10 +15,7 @@ import java.nio.file.Paths;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
+import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -95,17 +91,21 @@ public interface EmbeddedDb {
 
     @Override
     public void close() {
-      // TODO: hangs open on non-intellij windows
-      postgres.stop();
+      log.log(Level.WARNING, "Stopping Postgres");
       try {
-        Files.walk(dataDir).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
-      } catch (IOException e) { Logger.getAnonymousLogger().log(Level.WARNING, "Unable to delete " + dataDir, e); }
+        postgres.stop();
+      } catch (Exception e) { log.log(Level.WARNING, "Failed to stop Postgres", e); }
+      try {
+        Files.walk(dataDir).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(file -> {
+          if (!file.delete()) log.log(Level.WARNING, "Failed to delete {0}", file);
+        });
+      } catch (IOException e) { log.log(Level.WARNING, "Failed to delete " + dataDir, e); }
     }
 
     public static class DelegatingCommandLineOverrideRuntimeConfig
         implements IRuntimeConfig, ICommandLinePostProcessor {
-      public static final String POSTGRES_EXE_NAME =
-          Platform.detect().equals(Platform.Windows) ? "postgres.exe" : "postgres";
+      public static final String POSTGRES_EXE_CONTAINS =
+          Platform.detect().equals(Platform.Windows) ? "bin\\postgres.exe" : "bin/postgres";
       public final Path dataDir;
       public final IRuntimeConfig delegate;
       public final List<String> additionalArgs;
@@ -130,8 +130,8 @@ public interface EmbeddedDb {
 
       @Override
       public List<String> process(Distribution distribution, List<String> args) {
-        List<String> result = delegate.getCommandLinePostProcessor().process(distribution, args);
-        if (!result.isEmpty() && result.get(0).endsWith(POSTGRES_EXE_NAME)) {
+        List<String> result = new ArrayList<>(delegate.getCommandLinePostProcessor().process(distribution, args));
+        if (!result.isEmpty() && result.stream().anyMatch(s -> s.contains(POSTGRES_EXE_CONTAINS))) {
           // Add SSL keys
           try {
             Files.write(dataDir.resolve("server.crt"),
@@ -139,7 +139,15 @@ public interface EmbeddedDb {
             Files.write(dataDir.resolve("server.key"),
                 Files.readAllBytes(Paths.get(getClass().getResource("keys/server.key").toURI())));
           } catch (Exception e) { throw new RuntimeException(e); }
-          result.addAll(additionalArgs);
+          // As a special case, if this is "runas" on Windows then we have to
+          //  add these as string pieces inside the last quote
+          if (result.get(0).equals("runas") && result.get(result.size() - 1).endsWith("\"")) {
+            String lastParam = result.get(result.size() - 1);
+            lastParam = lastParam.substring(0, lastParam.length() - 1) + ' ' + String.join(" ", additionalArgs) + '"';
+            result.set(result.size() - 1, lastParam);
+          } else {
+            result.addAll(additionalArgs);
+          }
         }
         log.log(Level.INFO, "Running: " + String.join(" ", result));
         return result;

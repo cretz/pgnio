@@ -37,10 +37,14 @@ public class SubscribableQueryTest extends DbTestBase {
       conn.simpleQueryExec("NOTIFY test_notifications").
           thenCompose(c -> c.simpleQueryExec("NOTIFY test_notifications, 'test1'")).
           thenCompose(c -> {
+            // Let's just wait until the size is 2 and then we'll prepare it to stop and send the next
+            try {
+              for (int i = 0; i < 20 && notifications.size() < 2; i++) Thread.sleep(50);
+            } catch (InterruptedException e) { throw new RuntimeException(e); }
+            Assert.assertEquals(2, notifications.size());
             listenStopAfterReceipt.set(true);
             return c.simpleQueryExec("NOTIFY test_notifications, 'test2'");
           })).getProcessId();
-
     // Wait for listen conn to exit and confirm notifications
     listen.get();
     List<Subscribable.Notification> expected = Arrays.asList(

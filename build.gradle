@@ -36,6 +36,7 @@ project(':driver') {
             outputs.upToDateWhen {false}
             showStandardStreams = true
             exceptionFormat = 'full'
+            events 'passed', 'skipped', 'failed'
         }
     }
 }
