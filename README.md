@@ -86,8 +86,9 @@ List<QueryMessage.Row> rows = pool.withConnection(conn ->
 System.out.println("Current DB: " + RowReader.DEFAULT.get(rows.get(0), "database_name", String.class));
 ```
 
-The `Config`'s `poolSize` determines the fixed pool size. A `ConnectionPool` should be closed after use. For the rest of
-these examples, the `pool` variable above will be reused.
+The `Config`'s `poolSize` determines the fixed pool size. While not set by default, developers are encouraged to set
+`Config.poolValidationQuery` to something like `SELECT 1` to make sure borrowed connections are always valid. A
+`ConnectionPool` should be closed after use. For the rest of these examples, the `pool` variable above will be reused.
 
 #### Execute simple queries
 
@@ -363,7 +364,56 @@ they appear in the [PostgreSQL data type documentation](https://www.postgresql.o
 
 | PostgreSQL Type | Java Type
 | --- | --- |
+| `smallint` | `java.lang.Short` |
+| `integer` | `java.lang.Integer` |
+| `bigint` | `java.lang.Long` |
+| `decimal` | `java.lang.BigDecimal`<sup>1</sup> |
+| `numeric` | `java.lang.BigDecimal`<sup>1</sup> |
+| `real` | `java.lang.Float` |
+| `double precision` | `java.lang.Double` |
+| `smallserial` | `java.lang.Short` |
+| `serial` | `java.lang.Integer` |
+| `bigserial` | `java.lang.Long` |
+| `money` | `asyncpg.DataType.Money` |
+| `varchar(n)` | `java.lang.String` |
+| `char(n)` | `java.lang.String` |
+| `text` | `java.lang.String` |
+| `bytea` | `byte[]` |
+| `timestamp without time zone` | `java.time.LocalDateTime` |
+| `timestamp with time zone` | `java.time.OffsetDateTime` |
+| `date` | `java.time.LocalDate` |
+| `time without time zone` | `java.time.LocalTime` |
+| `time with time zone` | `java.time.OffsetTime` |
+| `interval` | `asyncpg.DataType.Interval` |
+| `boolean` | `java.lang.Boolean` |
+| enumerated types | `java.lang.String` |
+| `point` | `asyncpg.DataType.Point` |
+| `line` | `asyncpg.DataType.Line` |
+| `lseg` | `asyncpg.DataType.LineSegment` |
+| `box` | `asyncpg.DataType.Box` |
+| `path` | `asyncpg.DataType.Path` |
+| `polygon` | `asyncpg.DataType.Polygon` |
+| `circle` | `asyncpg.DataType.Circle` |
+| `inet` | `asyncpg.DataType.Inet` |
+| `cidr` | `asyncpg.DataType.Inet` |
+| `macaddr` | `asyncpg.DataType.MacAddr` |
+| `macaddr8` | `asyncpg.DataType.MacAddr` |
+| `bit(n)` | `java.lang.String` |
+| `bit varying(n)` | `java.lang.String` |
+| `tsvector` | `java.lang.String` |
+| `tsquery` | `java.lang.String` |
+| `uuid` | `java.util.UUID` |
+| `xml` | `java.lang.String` |
+| `json` | `java.lang.String` |
+| `jsonb` | `java.lang.String` |
+| arrays | arrays |
+| all other types | `java.lang.String` |
 
+Notes:
+
+1. If `decimal` or `numeric` are expected to ever be NaN or infinity, users might prefer to deserialize to `String`
+   first before converting to `BigDecimal`. Otherwise an exception occurs. For parameters that need to be NaN or
+   infinity, consider using a float or double.
 
 #### Reading multidimensional array results
 

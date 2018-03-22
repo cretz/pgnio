@@ -4,21 +4,18 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.*;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * A simple connection pool. As connections are borrowed or returned, they are evicted and replaced by new connections
- * if they are no longer open. Otherwise, connections are reset via {@link Connection.Started#fullReset()} before placed
- * back into the pool. Developers are encouraged to use {@link #withConnection(Function)} and to return a future which
- * will guarantee the connection is returned to the pool even on error. If developers use {@link #borrowConnection()},
- * they must call {@link #returnConnection(QueryReadyConnection.AutoCommit)} even on error and even if it's will a null
- * value. Not doing so will prevent the pool from maintaining its fixed size.
+ * if they are no longer open/valid. Otherwise, connections are reset via {@link Connection.Started#fullReset()} before
+ * placed back into the pool. Developers are encouraged to use {@link #withConnection(Function)} and to return a future
+ * which will guarantee the connection is returned to the pool even on error. If developers use
+ * {@link #borrowConnection()}, they must call {@link #returnConnection(QueryReadyConnection.AutoCommit)} even on error
+ * and even if it's with a null value. Not doing so will prevent the pool from maintaining its fixed size.
  */
 public class ConnectionPool implements AutoCloseable {
   protected static final Logger log = Logger.getLogger(ConnectionPool.class.getName());
@@ -39,20 +36,50 @@ public class ConnectionPool implements AutoCloseable {
     }
   }
 
-  /**
-   * Borrow a connection for use. If a connection is not available, this blocks until one is made available. This may
-   * internally create a new connection if the one that would be returned is no longer open. Developers who call this
-   * directly must make sure to call {@link #returnConnection(QueryReadyConnection.AutoCommit)} when they are through
-   * with the connection (or pass null if they don't want the connection in the pool anymore) even on failure. For
-   * simplicity, developers are encouraged to instead use {@link #withConnection(Function)} when they can.
-   */
+  /** Shortcut for {@link #borrowConnection(long, TimeUnit)} using configured default timeouts */
   public CompletableFuture<QueryReadyConnection.AutoCommit> borrowConnection() {
+    return borrowConnection(config.defaultTimeout, config.defaultTimeoutUnit);
+  }
+
+  /**
+   * Borrow a connection for use. If a connection is not available, this blocks until one is made available or the
+   * timeout is reached (which throws an {@link IllegalStateException}). A timeout of zero means wait indefinitely. This
+   * may internally create a new connection if the one that would be returned is no longer open/valid. Developers who
+   * call this directly must make sure to call {@link #returnConnection(QueryReadyConnection.AutoCommit)} when they are
+   * through with the connection (or pass null if they don't want the connection in the pool anymore) even on failure.
+   * For simplicity, developers are encouraged to instead use {@link #withConnection(Function)} when they can.
+   */
+  public CompletableFuture<QueryReadyConnection.AutoCommit> borrowConnection(long timeout, TimeUnit unit) {
     if (closed) throw new IllegalStateException("Pool is closed");
     CompletableFuture<QueryReadyConnection.AutoCommit> fut;
     try {
-      fut = connections.take();
+      fut = timeout == 0L ? connections.take() : connections.poll(timeout, unit);
+      if (fut == null) throw new IllegalStateException("Timeout waiting for connection");
     } catch (InterruptedException e) { throw new RuntimeException(e); }
-    return fut.thenCompose(conn -> conn.ctx.io.isOpen() ? CompletableFuture.completedFuture(conn) : newConnection());
+    // Throw if not open so a new one is made
+    fut = fut.thenApply(conn -> {
+      if (!conn.ctx.io.isOpen()) throw new IllegalStateException("Not open");
+      return conn;
+    });
+    // If there is a validation query, run it and terminate on failure
+    if (config.poolValidationQuery != null) {
+      String validationQuery = config.poolValidationQuery;
+      fut = fut.thenCompose(c ->
+          c.simpleQueryExec(validationQuery).handle((conn, ex) -> {
+            if (ex != null)
+              return c.terminate().handle((__, ___) -> {
+                if (ex instanceof RuntimeException) throw (RuntimeException) ex;
+                throw new RuntimeException(ex);
+              }).thenApply(__ -> c);
+            return CompletableFuture.completedFuture(conn);
+          }).thenCompose(Function.identity()));
+    }
+    // On any error, create new connection...otherwise return existing
+    return fut.handle((conn, err) -> {
+      if (err == null) return CompletableFuture.completedFuture(conn);
+      log.log(Level.WARNING, "Error on borrowed connection, returning new one", err);
+      return newConnection();
+    }).thenCompose(Function.identity());
   }
 
   protected CompletableFuture<QueryReadyConnection.AutoCommit> newConnection() {
@@ -83,16 +110,23 @@ public class ConnectionPool implements AutoCloseable {
     } catch (InterruptedException e) { throw new RuntimeException(e); }
   }
 
-  /**
-   * Invoke the function with a borrowed connection. The result of the function must be a future and the connection is
-   * guaranteed to be returned to the pool on completion of the resulting future. The result of this method is the
-   * future from the callback (with the return-to-pool step added). This is a simpler alternative to
-   * {@link #borrowConnection()} + {@link #returnConnection(QueryReadyConnection.AutoCommit)} which does things like
-   * make sure the connection is returned even on error. Note, if an error happens directly within the callback instead
-   * of returned as an errored future, it will be wrapped and turned into an errored future.
-   */
+  /** Shortcut to {@link #withConnection(long, TimeUnit, Function)} using the configured default timeout */
   public <T> CompletableFuture<T> withConnection(Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
-    return borrowConnection().
+    return withConnection(config.defaultTimeout, config.defaultTimeoutUnit, fn);
+  }
+
+  /**
+   * Invoke the function with a borrowed connection or throw if timeout reached waiting for one. A timeout of 0 waits
+   * forever for a connection. The result of the function must be a future and the connection is guaranteed to be
+   * returned to the pool on completion of the resulting future. The result of this method is the future from the
+   * callback (with the return-to-pool step added). This is a simpler alternative to {@link #borrowConnection()} +
+   * {@link #returnConnection(QueryReadyConnection.AutoCommit)} which does things like make sure the connection is
+   * returned even on error. Note, if an error happens directly within the callback instead of returned as an errored
+   * future, it will be wrapped and turned into an errored future.
+   */
+  public <T> CompletableFuture<T> withConnection(long waitForConnTimeout, TimeUnit waitForConnUnit,
+      Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
+    return borrowConnection(waitForConnTimeout, waitForConnUnit).
         // Handle exception early even on borrow
         whenComplete((__, ex) -> { if (ex != null) returnConnection(null); }).
         // Otherwise release no matter what happens in fn

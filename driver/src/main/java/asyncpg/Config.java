@@ -54,6 +54,11 @@ public class Config {
   public ParamWriter paramWriter = ParamWriter.DEFAULT;
   /** The number of connections maintained in the {@link ConnectionPool} (when used) */
   public int poolSize = 5;
+  /**
+   * If present, the query that is run by the connection pool to make sure the connection is valid before returning it.
+   * Default is null
+   */
+  public @Nullable String poolValidationQuery;
   /** Function to connect and authenticate a connection from a config. Default is {@link Connection#authed(Config)} */
   @SuppressWarnings("initialization")
   public Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector = Connection::authed;
@@ -124,6 +129,11 @@ public class Config {
   public Config paramWriter(ParamWriter paramWriter) { this.paramWriter = paramWriter; return this; }
   /** @see #poolSize */
   public Config poolSize(int poolSize) { this.poolSize = poolSize; return this; }
+  /** @see #poolValidationQuery */
+  public Config poolValidationQuery(String poolValidationQuery) {
+    this.poolValidationQuery = poolValidationQuery;
+    return this;
+  }
   /** @see #connector */
   public Config connector(Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector) {
     this.connector = connector;

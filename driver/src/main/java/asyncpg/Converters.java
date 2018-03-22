@@ -250,8 +250,9 @@ public interface Converters {
       to.put(Polygon.class.getName(), convertTextToItem(Polygon::valueOf, DataType.POLYGON));
       to.put(Short.class.getName(), convertTextToItem(Short::valueOf, DataType.INT2));
       to.put(String.class.getName(), convertTextToItem(Function.identity(),
-          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.NAME, DataType.CHAR, DataType.UUID, DataType.JSON,
-          DataType.JSONB, DataType.BIT, DataType.VARBIT, DataType.CIDR, DataType.INET, DataType.XML));
+          DataType.TEXT, DataType.VARCHAR, DataType.BPCHAR, DataType.NAME, DataType.NUMERIC, DataType.CHAR,
+          DataType.UUID, DataType.JSON, DataType.JSONB, DataType.BIT, DataType.VARBIT, DataType.CIDR, DataType.INET,
+          DataType.XML));
       to.put(java.util.UUID.class.getName(), convertTextToItem(java.util.UUID::fromString, DataType.UUID));
       TO_CONVERTERS = Collections.unmodifiableMap(to);
     }
