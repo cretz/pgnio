@@ -2,8 +2,11 @@ package asyncpg;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -17,10 +20,11 @@ import java.util.logging.Logger;
  * they must call {@link #returnConnection(QueryReadyConnection.AutoCommit)} even on error and even if it's will a null
  * value. Not doing so will prevent the pool from maintaining its fixed size.
  */
-public class ConnectionPool {
+public class ConnectionPool implements AutoCloseable {
   protected static final Logger log = Logger.getLogger(ConnectionPool.class.getName());
   protected final Config config;
   protected final BlockingQueue<CompletableFuture<QueryReadyConnection.AutoCommit>> connections;
+  protected volatile boolean closed;
 
   /** Create a connection pool for the given connection with a fixed size of {@link Config#poolSize} */
   @SuppressWarnings("initialization")
@@ -43,6 +47,7 @@ public class ConnectionPool {
    * simplicity, developers are encouraged to instead use {@link #withConnection(Function)} when they can.
    */
   public CompletableFuture<QueryReadyConnection.AutoCommit> borrowConnection() {
+    if (closed) throw new IllegalStateException("Pool is closed");
     CompletableFuture<QueryReadyConnection.AutoCommit> fut;
     try {
       fut = connections.take();
@@ -61,6 +66,7 @@ public class ConnectionPool {
    */
   @SuppressWarnings("dereference.of.nullable")
   public void returnConnection(QueryReadyConnection.@Nullable AutoCommit conn) {
+    if (closed) throw new IllegalStateException("Pool is closed");
     try {
       // Only put back if still open. No, we don't deal with errors here before creating a new connection.
       // This is because it becomes too complicated, instead we just make the next take fail.
@@ -105,4 +111,18 @@ public class ConnectionPool {
           });
         });
   }
+
+  /** Empty the pool, mark it closed, and terminate all connections being held */
+  public CompletableFuture<Void> terminateAll() {
+    closed = true;
+    List<CompletableFuture<QueryReadyConnection.AutoCommit>> futs = new ArrayList<>();
+    connections.drainTo(futs);
+    CompletableFuture[] closedFuts = new CompletableFuture[futs.size()];
+    for (int i = 0; i < closedFuts.length; i++) closedFuts[i] = futs.get(i).thenCompose(Connection::terminate);
+    return CompletableFuture.allOf(closedFuts);
+  }
+
+  /** Call {@link #terminateAll()} and wait for completion */
+  @Override
+  public void close() throws ExecutionException, InterruptedException { terminateAll().get(); }
 }

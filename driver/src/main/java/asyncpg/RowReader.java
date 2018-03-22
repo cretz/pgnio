@@ -77,6 +77,7 @@ public class RowReader {
 
   @SuppressWarnings("unchecked")
   protected <T> Converters.@Nullable To<? extends T> getConverter(Class<T> typ) {
+    if (typ.isPrimitive()) typ = Util.boxedClassFromPrimitive(typ);
     Converters.To conv = converters.get(typ.getName());
     // TODO: interfaces?
     if (conv != null || typ.getSuperclass() == null) return conv;
@@ -197,7 +198,7 @@ public class RowReader {
       }
     }
     if (ctx.chars.length <= ctx.index) throw new IllegalArgumentException("Unexpected end");
-    return (T) list.toArray();
+    return (T) Util.listToArray(list, subType);
   }
 
   @SuppressWarnings("unchecked")

@@ -1,5 +1,6 @@
 package asyncpg;
 
+import java.lang.reflect.Array;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.CompletionHandler;
@@ -8,6 +9,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /** Utilities used withing the library that may have use for others */
@@ -173,6 +175,31 @@ public class Util {
     try {
       return cl != null ? cl.loadClass(name) : Class.forName(name);
     } catch (ClassNotFoundException e) { throw new RuntimeException(e); }
+  }
+
+  /** Convert a list to an array, but supports primitive array types */
+  @SuppressWarnings("unchecked")
+  public static Object listToArray(List list, Class componentType) {
+    Object ret = Array.newInstance(componentType, list.size());
+    if (componentType == Boolean.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setBoolean(ret, i, (boolean) list.get(i));
+    else if (componentType == Byte.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setByte(ret, i, (byte) list.get(i));
+    else if (componentType == Character.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setChar(ret, i, (char) list.get(i));
+    else if (componentType == Double.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setDouble(ret, i, (double) list.get(i));
+    else if (componentType == Float.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setFloat(ret, i, (float) list.get(i));
+    else if (componentType == Integer.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setInt(ret, i, (int) list.get(i));
+    else if (componentType == Long.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setLong(ret, i, (long) list.get(i));
+    else if (componentType == Short.TYPE)
+      for (int i = 0; i < list.size(); i++) Array.setShort(ret, i, (short) list.get(i));
+    else
+      for (int i = 0; i < list.size(); i++) Array.set(ret, i, list.get(i));
+    return ret;
   }
 
   private Util() { }

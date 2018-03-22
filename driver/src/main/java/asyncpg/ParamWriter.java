@@ -44,6 +44,7 @@ public class ParamWriter {
 
   @SuppressWarnings("unchecked")
   protected <@Nullable T> Converters.@Nullable From<? extends T> getConverter(Class<T> typ, boolean topLevel) {
+    if (typ.isPrimitive()) typ = Util.boxedClassFromPrimitive(typ);
     Converters.From conv = converters.get(typ.getName());
     if (conv == null) {
       if (typ.isArray()) {

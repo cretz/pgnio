@@ -31,7 +31,8 @@ TODO: bintray/jcenter or maven central or jitpack once decided
 
 Below are simple examples on how to use the client library. The library makes heavy use of composition with
 `CompletableFuture` values which is why some of the code appears quite functional and non-ergonomic. All top-level
-classes in the library are in the `asyncpg` package.
+classes in the library are in the `asyncpg` package. While there are synchronous `get` invocations in these examples,
+in normal use developers might not want to block for a result.
 
 #### Create and use a single connection
 
@@ -75,48 +76,274 @@ System.out.println("Current DB: " + RowReader.DEFAULT.get(rows.get(0), "database
 
 #### Create and use a connection pool
 
-TODO
+A `ConnectionPool` can be created with a `Config` like a connection and has a `withConnection` method that helps make
+sure connections can be reused:
+
+```java
+ConnectionPool pool = new ConnectionPool(conf);
+List<QueryMessage.Row> rows = pool.withConnection(conn ->
+    conn.simpleQueryRows("SELECT current_database() AS database_name")).get();
+System.out.println("Current DB: " + RowReader.DEFAULT.get(rows.get(0), "database_name", String.class));
+```
+
+The `Config`'s `poolSize` determines the fixed pool size. A `ConnectionPool` should be closed after use. For the rest of
+these examples, the `pool` variable above will be reused.
 
 #### Execute simple queries
 
-TODO
+To execute a simple query and retrieve the query result connection state, use `simpleQuery`. This usage requires that
+you mark the result `done`. There are convenience methods to do this automatically and return values. They are
+`simpleQueryExec` for discarding the result, `simpleQueryRowCount` to get the returned/affected row count, and
+`simpleQueryRows` to get the row list:
+
+```java
+pool.withConnection(c ->
+    c.simpleQueryExec("CREATE TEMP TABLE foo (bar VARCHAR(100))").
+        // The result is just of type java.lang.Void anyways, so ignore it
+        thenCompose(__ -> c.simpleQueryRowCount("INSERT INTO foo VALUES ('test1'), ('test2')")).
+        // The result is an integer, so this outputs "Rows: 2"
+        thenAccept(rowCount -> System.out.println("Rows: " + rowCount)).
+        // Now select em all
+        thenCompose(__ -> c.simpleQueryRows("SELECT * FROM foo")).
+        // Show the strings
+        thenAccept(rows ->
+            System.out.println("Rows: " + rows.stream().
+                map(row -> RowReader.DEFAULT.get(row, "bar", String.class)).collect(Collectors.joining(", ")))
+        )
+).get();
+```
 
 #### Reading row values
 
-TODO
+Rows are returned as `QueryMessage.Row` objects. These objects include metadata about the columns and the two
+dimensional byte array, with a byte array for each column. Instead of putting the logic to convert from byte arrays
+inside the row class, AsyncPG offers a `RowReader` class for reading row data. The class may be manually instantiated
+with custom converters, but most common uses will use the `RowReader.DEFAULT` singleton:
 
-#### Prepare, bind, and execute queries with parameters
+```java
+pool.withConnection(c ->
+    c.simpleQueryRows("SELECT 'test' AS first_row, 12, '{5, 6}'::integer[]").
+        thenAccept(rows -> {
+            // Pass in the row, column name, and type to fetch
+            System.out.println("Col 1: " + RowReader.DEFAULT.get(rows.get(0), "first_row", String.class));
+            // Can also pass in the zero-based column index
+            System.out.println("Col 2: " + RowReader.DEFAULT.get(rows.get(0), 1, Integer.class));
+            // Even works with arrays
+            System.out.println("Col 3: " + Arrays.toString(RowReader.DEFAULT.get(rows.get(0), 1, int[].class)));
+        })
+).get();
+```
 
-TODO
+See the Javadoc for more information on custom column value converters. See the [Data Types](#data-types) section below
+for more information on supported data types.
 
-#### Use transactions
+#### Execute queries with parameters
 
-TODO
+In the [PostgreSQL protocol](https://www.postgresql.org/docs/current/static/protocol.html), there are two ways to submit
+queries. One is the simple query form which issues a query and gets row metadata and row data. These are the calls
+prefixed with "simple". The other way is the "advanced" or "prepared" approach which separates the steps to parse the
+query, bind parameters, describe the result, and execute the query. The "simple" approach can be seen as just combining
+those 4 steps together in one call on the server side. AsyncPG offers separate calls for each of these steps allowing
+the caller to choose when/how they are called. There are also "prepared" convenience methods analagous to the "simple"
+convenience methods which invoke all of these steps internally:
+
+```java
+pool.withConnection(c ->
+    // Ask for a series from 1 throuh a parameter (4 in this case)
+    c.preparedQueryRows("SELECT * FROM generate_series(1, $1)", 4).
+        // Will be a count of 4
+        thenAccept(rows -> System.out.println("Row count: " + rows.size()))
+).get();
+```
+
+Internally, AsyncPG uses a `ParamWriter` instance (configured with a default via `Config.paramWriter`) to convert from
+Java types to PostgreSQL parameters. See the [Data Types](#data-types) for more information on suggested data types for
+certain parameter types.
 
 #### Reuse prepared queries
 
-TODO
+The prepared queries above are "unnamed" (internally they use an empty string as the name) which means they can't easily
+be reused. AsyncPG supports named prepared queries which are stored for the life of the connection or until closed.
+Unlike unnamed prepared queries, there aren't convenience methods to create a named query, but convenience methods can
+be used for binding, executing, and retrieving rows:
+
+```java
+pool.withConnection(c ->
+    c.simpleQueryExec("CREATE TEMP TABLE foo (bar VARCHAR(100))").
+        thenCompose(__ -> c.prepareReusable("myquery", "INSERT INTO foo VALUES ($1)")).
+        // We would use bindDescribeExecuteAndDone if this were a select
+        thenCompose(prepared -> prepared.bindExecuteAndDone("test1")).
+        thenCompose(result -> result.done()).
+        // Count will be 1
+        thenCompose(__ -> c.simpleQueryRows("SELECT COUNT(1) FROM foo")).
+        thenAccept(rows ->
+            System.out.println("Count: " + RowReader.DEFAULT.get(rows.get(0), 0, Long.class))).
+        // Reuse the query
+        thenCompose(__ -> c.reusePrepared("myquery")).
+        thenCompose(prepared -> prepared.bindExecuteAndDone("test2")).
+        thenCompose(result -> result.done()).
+        // Count will be 2
+        thenCompose(__ -> c.simpleQueryRows("SELECT COUNT(1) FROM foo")).
+        thenAccept(rows ->
+            System.out.println("Count: " + RowReader.DEFAULT.get(rows.get(0), 0, Long.class))).
+        // Try to close the statement regardless of error
+        handle((__, ex) ->
+            c.reusePrepared("myquery").
+                thenCompose(prepared -> prepared.closeStatement()).
+                thenCompose(prepared -> prepared.done()).
+                thenCompose(result -> result.done()).
+                thenAccept(___ -> { if (ex != null) throw new RuntimeException(ex); })).
+        thenCompose(Function.identity())
+).get();
+```
+
+Note, "life of the connection" means as long as the socket is open to the server. So when using a connection pool,
+developers should always close their prepared statements or they will remain open as long as the connection does.
+
+#### Use transactions
+
+The regular "ready for query" connection state is the `QueryReadyConnection.AutoCommit` class which automatically
+commits everything. Running `beginTransaction` on it returns a `QueryReadyConnection.InTransaction` class which won't
+return back to auto commit mode until `commitTransaction` or `rollbackTransaction` is executed. Example:
+
+```java
+pool.withConnection(c ->
+    c.simpleQueryExec("CREATE TEMP TABLE foo (bar VARCHAR(100))").
+        // Start the transaction
+        thenCompose(__ -> c.beginTransaction()).
+        // Insert a value
+        thenCompose(txn -> txn.simpleQueryExec("INSERT INTO foo VALUES ('test')").thenApply(__ -> txn)).
+        // Count should be 1
+        thenCompose(txn ->
+            txn.simpleQueryRows("SELECT COUNT(1) FROM foo").thenApply(rows -> {
+                System.out.println("Count: " + RowReader.DEFAULT.get(rows.get(0), 0, Long.class));
+                return txn;
+            })).
+        // Roll it back
+        thenCompose(txn -> txn.rollbackTransaction()).
+        // Count should be 0
+        thenCompose(conn -> conn.simpleQueryRows("SELECT COUNT(1) FROM foo")).
+        thenAccept(rows ->
+            System.out.println("Count: " + RowReader.DEFAULT.get(rows.get(0), 0, Long.class)))
+).get();
+```
+
+Transactions can also be nested which is internally supported via savepoints.
 
 #### Listen for notifications
 
-TODO
+PostgreSQL has `LISTEN`/`NOTIFY` support which allows pub/sub. AsyncPG allows subscription to these messages on a per
+connection basis. Once subscribed to the messages, it must be read from the server side. This will happen during normal
+query operations since a notification is sent along with other messages. But if not querying, developers need to wait
+while reading for a message, which can be done via `unsolicitedMessageTick` and a timeout.
+
+```java
+// Create a listener
+CompletableFuture listener = pool.withConnection(c -> {
+    // Subscribe to the notification
+    c.notifications().subscribe(notification -> {
+        System.out.println("Got: " + notification.payload);
+        // This function requires a future result so it can continue on its way.
+        // Here we just return a completed nothing, but developers could listen for another message if they wanted.
+        return CompletableFuture.completedFuture(null);
+    });
+    // Let PostgreSQL know we're listening
+    return c.simpleQueryExec("LISTEN my_notifications").
+        // Wait for 30 seconds for a single message.
+        // To listen for more messages, we'd have to call this again.
+        thenCompose(__ -> c.unsolicitedMessageTick(30, TimeUnit.SECONDS));
+});
+
+// Send a notification
+pool.withConnection(c -> c.simpleQueryExec("NOTIFY my_notifications, 'test1'")).get();
+
+// Wait for listener to end
+listener.get();
+```
+
+In addition to notifications, developers can also listen for notices and server parameter/option changes (e.g. time zone
+change). Note, when a connection is returned to a pool, all of its subscriptions are cleared. Same thing when a
+connection is terminated. Therefore, developers who want to listen to notifications for a longer period should consider
+creating a longer lived connection or just never giving the connection back to the pool.
 
 #### Copy to a table
 
-TODO
+PostgreSQL supports a fast insert mode called a [COPY](https://www.postgresql.org/docs/current/static/sql-copy.html) and
+AsyncPG supports it. Here's how to insert some CSV values:
+
+```java
+pool.withConnection(c ->
+    c.simpleQueryExec("CREATE TEMP TABLE foo (bar VARCHAR(100), baz integer)").
+        // Begin copy
+        thenCompose(__ -> c.simpleCopyIn("COPY foo FROM STDIN CSV")).
+        thenCompose(copy -> copy.sendData("test1,123\n".getBytes(StandardCharsets.UTF_8))).
+        thenCompose(copy -> copy.sendData("test2,456\n".getBytes(StandardCharsets.UTF_8))).
+        thenCompose(copy -> copy.done()).
+        // Count should be 2
+        thenCompose(__ -> c.simpleQueryRows("SELECT COUNT(1) FROM foo")).
+        thenAccept(rows ->
+            System.out.println("Count: " + RowReader.DEFAULT.get(rows.get(0), 0, Long.class)))
+).get();
+```
+
+There are other formats including the default text format. `ParamWriter` can be used to help with this.
 
 #### Copy from a table
 
-TODO
+Copying can also occur when reading out from a table:
+
+```java
+pool.withConnection(c ->
+    c.simpleQueryExec("CREATE TEMP TABLE foo (bar VARCHAR(100), baz integer);" +
+            "INSERT INTO foo VALUES ('test1', 123), ('test2', 456)").
+        thenCompose(__ -> c.simpleCopyOut("COPY foo TO STDOUT CSV")).
+        thenCompose(copy -> {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            return copy.
+                receiveEachData(b -> {
+                    try { bytes.write(b); }
+                    catch (IOException e) { throw new RuntimeException(e); }
+                }).
+                thenAccept(__ ->
+                    System.out.println("Got:\n" + new String(bytes.toByteArray(), StandardCharsets.UTF_8))).
+                thenCompose(__ -> copy.done());
+        })
+).get();
+```
 
 #### Cancelling a query
 
-TODO
+In PostgreSQL, a long-running query cannot simply be cancelled within the same connection. Instead, a separate
+connection must be created solely to cancel using the original connection's process ID and secret key:
+
+```java
+// We'll just set the process ID and secret key into an int array
+CompletableFuture<int[]> processIdAndSecretKey = new CompletableFuture<>();
+
+// Run a query for 10 seconds
+CompletableFuture longQuery = pool.withConnection(c -> {
+    // Set the process ID and secret key of this connection
+    processIdAndSecretKey.complete(new int[] { c.getProcessId(), c.getSecretKey() });
+    // Wait 10 seconds
+    return c.simpleQueryExec("SELECT pg_sleep(10)");
+});
+
+// Kill that query
+processIdAndSecretKey.thenCompose(idAndKey ->
+    Connection.init(conf).thenCompose(c -> c.cancelOther(idAndKey[0], idAndKey[1]))).get();
+
+// This will throw an exception since it was cancelled
+longQuery.get();
+```
+
+Note, the newly created connection doesn't have to be explicitly closed/terminated because it is implied with
+`cancelOther`.
 
 #### More...
 
 Many more cases are not covered here but can be learned from the code or test cases including:
 
+* Advanced handling of query results including asking for one row at a time, skipping results, etc
 * Fetching a maximum bound-query row set then fetching more
 * Nested transactions
 * Fetching results from multiple queries
@@ -130,7 +357,13 @@ Many more cases are not covered here but can be learned from the code or test ca
 
 #### Data types
 
-TODO
+Below is a table of PostgreSQL types and their suggested Java data type. Some Java types can be used for multiple
+PostgreSQL types and some PostgreSQL types can be represented by multiple Java types. These are listed in the order
+they appear in the [PostgreSQL data type documentation](https://www.postgresql.org/docs/current/static/datatype.html)
+
+| PostgreSQL Type | Java Type
+| --- | --- |
+
 
 #### Reading multidimensional array results
 

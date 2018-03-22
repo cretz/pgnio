@@ -41,6 +41,7 @@ public class QueryTest extends DbTestBase {
     typeChecks.addAll(Arrays.asList(
         TypeCheck.of("smallint", (short) 100, Short.MIN_VALUE, Short.MAX_VALUE, null),
         TypeCheck.of("integer", 101, Integer.MIN_VALUE, Integer.MAX_VALUE, null),
+        TypeCheck.of("integer[]", new int[] { 101, 201 }, new int[] { 102, 202 }).overrideEquals(Arrays::equals),
         TypeCheck.of("bigint", 102L, Long.MIN_VALUE, Long.MAX_VALUE, null),
         TypeCheck.of("numeric(9, 3)", new BigDecimal("1.030"), null),
         TypeCheck.of("numeric", new BigInteger("104000000000000000000"), null),
@@ -172,7 +173,7 @@ public class QueryTest extends DbTestBase {
       cols[i] = "col_" + typeCheck.safeName + "_" + i + " " +
           typeCheck.dbType + (nullable ? " NULL" : " NOT NULL");
     }
-    return conn.simpleQueryExec("CREATE TABLE " + name + " (" + String.join(",", cols) + ")");
+    return conn.simpleQueryExec("CREATE TEMP TABLE " + name + " (" + String.join(",", cols) + ")");
   }
 
   CompletableFuture<QueryReadyConnection.AutoCommit> dropTable(QueryReadyConnection.AutoCommit conn, String name) {

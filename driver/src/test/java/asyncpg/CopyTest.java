@@ -9,7 +9,7 @@ public class CopyTest extends DbTestBase {
   @Test
   public void testSimplyCopy() {
     withConnectionSync(c ->
-        c.simpleQueryExec("CREATE TABLE testSimplyCopy (foo VARCHAR(255), bar integer)").
+        c.simpleQueryExec("CREATE TEMP TABLE testSimplyCopy (foo VARCHAR(255), bar integer)").
             thenCompose(conn -> conn.simpleCopyIn("COPY testSimplyCopy FROM STDIN CSV")).
             thenCompose(copy -> copy.sendData("test1,123\n".getBytes(StandardCharsets.UTF_8))).
             thenCompose(copy -> copy.sendData("test2,456\n".getBytes(StandardCharsets.UTF_8))).
@@ -30,8 +30,7 @@ public class CopyTest extends DbTestBase {
                     Assert.assertEquals("test1,123\ntest2,456\n", bld.toString());
                     return copy.done();
                   });
-            }).
-            thenCompose(conn -> conn.simpleQueryExec("DROP TABLE testSimplyCopy"))
+            })
     );
   }
 }
