@@ -32,6 +32,7 @@ project(':driver') {
     }
     test {
         systemProperty 'java.util.logging.config.file', 'src/test/resources/logging.properties'
+        systemProperty 'asyncpg.postgres.version', System.getProperty('asyncpg.postgres.version')
         testLogging {
             outputs.upToDateWhen {false}
             showStandardStreams = true

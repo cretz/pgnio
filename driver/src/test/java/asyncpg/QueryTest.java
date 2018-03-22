@@ -1,6 +1,7 @@
 package asyncpg;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -97,7 +98,8 @@ public class QueryTest extends DbTestBase {
             new Inet(InetAddress.getByName("192.168.100.128"), 32), new Inet(InetAddress.getByName("2001:4f8:3:ba::")),
             new Inet(InetAddress.getByName("2001:4f8:3:ba::"), 128), null),
         TypeCheck.of("macaddr", MacAddr.valueOf("08:00:2b:01:02:03"), null),
-        TypeCheck.of("macaddr8", MacAddr.valueOf("08:00:2b:01:02:03:04:05"), null),
+        TypeCheck.of("macaddr8", MacAddr.valueOf("08:00:2b:01:02:03:04:05"), null).checkValid(() ->
+            Assume.assumeTrue("macaddr8 only present in >= 10", db.majorVersion() >= 10)),
         TypeCheck.of("bit", '1', '0', null),
         TypeCheck.of("bit(3)", "101", "010", null),
         TypeCheck.of("bit varying(5)", "101", "010", null),
@@ -144,6 +146,7 @@ public class QueryTest extends DbTestBase {
 
   @Test
   public void testSimpleQuery() {
+    typeCheck.checkValid();
     String tableName = "test_simple_query_" + typeCheck.safeName;
     QueryMessage.Row row = withConnectionSync(conn ->
         withTable(conn, tableName, c -> simpleInsertThenSelect(c, tableName)));
@@ -152,6 +155,7 @@ public class QueryTest extends DbTestBase {
 
   @Test
   public void testPreparedQuery() {
+    typeCheck.checkValid();
     String tableName = "test_prepared_query_" + typeCheck.safeName;
     QueryMessage.Row row = withConnectionSync(conn ->
         withTable(conn, tableName, c -> preparedInsertThenSelect(c, tableName)));
@@ -273,6 +277,7 @@ public class QueryTest extends DbTestBase {
     BiPredicate<T, T> overrideEquals;
     boolean arrayNotSupported;
     boolean multiDimensionalArrayNotSupported;
+    Runnable checkValid;
 
     TypeCheck(String name, String dbType, Class<T> valClass, T[] interestingVals) {
       this.name = name;
@@ -298,6 +303,7 @@ public class QueryTest extends DbTestBase {
     TypeCheck<T> overrideEquals(BiPredicate<T, T> overrideEquals) { this.overrideEquals = overrideEquals; return this; }
     TypeCheck<T> arrayNotSupported() { this.arrayNotSupported = true; return this; }
     TypeCheck<T> multiDimensionalArrayNotSupported() { this.multiDimensionalArrayNotSupported = true; return this; }
+    TypeCheck<T> checkValid(Runnable checkValid) { this.checkValid = checkValid; return this; }
 
     String valToSql(T val) {
       if (val == null) return "NULL";
@@ -334,7 +340,10 @@ public class QueryTest extends DbTestBase {
       };
       ret.beforeUse = beforeUse;
       ret.afterUse = afterUse;
+      ret.checkValid = checkValid;
       return ret;
     }
+
+    void checkValid() { if (checkValid != null) checkValid.run(); }
   }
 }

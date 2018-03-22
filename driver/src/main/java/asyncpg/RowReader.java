@@ -116,7 +116,6 @@ public class RowReader {
     return ret;
   }
 
-  // Creates a fake column of unspecified type
   /**
    * Convert the given Postgres string into the given type using
    * {@link #get(QueryMessage.RowMeta.Column, byte[], Class)} with a fake column set to text format.

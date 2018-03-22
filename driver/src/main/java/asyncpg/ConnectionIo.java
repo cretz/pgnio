@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/** Simple intrface to implement for network IO to/from server */
+/** Simple interface to implement for network IO to/from server */
 public interface ConnectionIo {
   /** Whether or not the network connection is still open */
   boolean isOpen();

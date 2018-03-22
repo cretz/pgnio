@@ -150,7 +150,7 @@ convenience methods which invoke all of these steps internally:
 
 ```java
 pool.withConnection(c ->
-    // Ask for a series from 1 throuh a parameter (4 in this case)
+    // Ask for a series from 1 through a parameter (4 in this case)
     c.preparedQueryRows("SELECT * FROM generate_series(1, $1)", 4).
         // Will be a count of 4
         thenAccept(rows -> System.out.println("Row count: " + rows.size()))
@@ -354,9 +354,7 @@ Many more cases are not covered here but can be learned from the code or test ca
 * `Notice` use and subscription
 * `SSL` including use of custom `SSLContext`s to validate keys
 
-### Notes
-
-#### Data types
+### Data types
 
 Below is a table of PostgreSQL types and their suggested Java data type. Some Java types can be used for multiple
 PostgreSQL types and some PostgreSQL types can be represented by multiple Java types. These are listed in the order
@@ -407,6 +405,7 @@ they appear in the [PostgreSQL data type documentation](https://www.postgresql.o
 | `json` | `java.lang.String` |
 | `jsonb` | `java.lang.String` |
 | arrays | arrays |
+| `hstore` | `java.util.Map<String, String>` |
 | all other types | `java.lang.String` |
 
 Notes:
@@ -415,33 +414,101 @@ Notes:
    first before converting to `BigDecimal`. Otherwise an exception occurs. For parameters that need to be NaN or
    infinity, consider using a float or double.
 
-#### Reading multidimensional array results
-
-TODO
-
-#### Testing on Windows
-
-TODO
-
 ### FAQ
 
 #### Why was this built?
 
-TODO
+My company needs a non-blocking PostgreSQL Java driver that is simple and yet can be used for advanced items. The other
+ones carry unnecessary dependencies, are opinionated on what they make visible, aren't very configurable with
+serialization, don't allow flexible use of the protocol, don't support all PostgreSQL features, and/or are
+unmaintained (I've opened issues or made PRs on some of them). Granted there is no guarantee that this one will be
+maintained forever either.
+
+As mentioned in the features/goals section, this library is simple, extensible, and both low-level + high-level.
+Serialization concerns are separated from protocol use. I also wanted to build this in preparation for the upcoming
+async JDBC API and to develop a deep understanding of the PostgreSQL protocol.
+
+#### Is "asynchronous" or "non-blocking" really better?
+
+No. Sometimes it is when you don't want to use a thread per connection though internally NIO2 leverages thread
+groups/pools. Also, since PostgreSQL's protocol doesn't support multiplexing a single connection there is even less
+benefit than there might be with other protocols. Having said that, rarely is it worse and this library could easily be
+used in a higher-level, synchronous, blocking application or library.
 
 #### Why aren't there built-in conversions for lists, sets, etc?
 
-TODO
+In order to make this library simple, only the practical converters are included. Those collections can easily be
+derived from arrays and/or custom converters can easily be written to build them.
 
 #### Why don't the conversions support `Type` lookups instead of `Class` lookups?
 
-TODO
+For the `RowReader`, the `get` accepts a `Class` instead of a `Type`. There was no need using the current converters
+to support generic types, but this may change in the future.
+
+#### Why don't the conversions look up by implemented interface instead of just superclass?
+
+For the current set of converters, simply traversing the class hierarchy to find a suitable conversion was good enough.
+If there is a need to specific a converter for an interface, this could be supported in the future.
 
 #### Why can't reading an `hstore` into a `Map` use the key and value types?
 
-TODO
+This library only supports `hstore` converting to a `Map<String, String>`. One might assume that, like arrays, it should
+allow map values of other types that recursively does conversions on them. But PostgreSQL doesn't tell you the value
+types of `hstore`. It was decided to perform the simple conversion. There is a `RowReader.get` call that accepts a
+string if the caller wants to convert further, but it was decided that this library would not do it for them.
+
+#### What about binary formatted parameters and results?
+
+PostgreSQL has two formats in the protocol for parameters and results: binary and text. Right now, AsyncPG only supports
+the text format (the default). The text format sends everything as normal strings and is portable across PostgreSQL
+versions. This is usually good enough for almost all purposes. However, as more use cases for binary formatting come
+about, it very well might be implemented in the library. In the meantime, the library is built to be extensible enough
+that `ParamWriter`s and `RowReader`s operate purely on bytes and anyone can write binary formatters. Also, all protocol
+calls that support specifying text or binary format are exposed to let the caller choose if they want.
+
+### Development
+
+#### Style
+
+AsyncPG gladly accepts pull requests. In general the style is two-space indent and try to be clean with line wrapping.
+Since this is also a library that can be used as a basis for others, we prefer to set the visibility protected instead
+of private or package private for anything that could have any value to anyone. We prefer fields over getters, nested
+classes over a bunch of files, simpler code over longer code, and clarity over confusion.
+
+The [checker framework](https://checkerframework.org/) is used mainly to check nullability. This is preferred over
+runtime checks for this library. Sometimes the initialization constraints get in the way, so feel free to mark code
+`@SuppressWarnings("initialization")`.
+
+#### Building
+
+The project can be built with Gradle. Unlike other projects, AsyncPG does not bundle a Gradle wrapper script with the
+repository. Simply download Gradle to `some/path` and run:
+
+    some/path/bin/gradle --no-daemon :driver:assemble
+
+Granted `--no-daemon` is just a choice that some choose to not keep a running Java process in the background, but it
+will be a slower build. Also, the [checker framework](https://checkerframework.org/)'s annotation processor slows down
+compilation quite a bit.
+
+#### Testing
+
+The unit tests are more like integration tests in that they actually run a PostgreSQL instance as an
+[embedded PostgreSQL server](https://github.com/yandex-qatools/postgresql-embedded/). It will automatically download
+itself and create directories as needed in `~/.embedpostgresql`. To run all tests, simply:
+
+    some/path/bin/gradle --no-daemon :driver:test
+
+By default it chooses the latest PostgreSQL version configured in the library (`10.2` as of this writing). A different
+version can be used by setting the version number that appears in the
+[download link](https://www.enterprisedb.com/download-postgresql-binaries) as the system property
+`asyncpg.postgres.version`. It is usually just the version with `-1` appended. So to test against `9.6.7`:
+
+    some/path/bin/gradle --no-daemon :driver:test -Dasyncpg.postgres.version=9.6.7-1
+
+Note, on Windows sometimes the process remains open or there are other oddities. Developers may have to kill the
+processes themselves and/or make sure the data files at `~/.embedpostgresql/data` are actually deleted (that is
+the `C:\Users\username\.embedpostgresql\data` directory).
 
 ### TODO
 
 * Streaming/logical replication
-* Test different PG versions

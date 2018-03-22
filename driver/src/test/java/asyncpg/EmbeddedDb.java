@@ -3,10 +3,12 @@ package asyncpg;
 import de.flapdoodle.embed.process.config.IRuntimeConfig;
 import de.flapdoodle.embed.process.config.io.ProcessOutput;
 import de.flapdoodle.embed.process.distribution.Distribution;
+import de.flapdoodle.embed.process.distribution.IVersion;
 import de.flapdoodle.embed.process.distribution.Platform;
 import de.flapdoodle.embed.process.runtime.ICommandLinePostProcessor;
 import de.flapdoodle.embed.process.store.IArtifactStore;
 import ru.yandex.qatools.embed.postgresql.EmbeddedPostgres;
+import ru.yandex.qatools.embed.postgresql.distribution.Version;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -26,6 +28,9 @@ public interface EmbeddedDb {
   EmbeddedDbConfig conf();
 
   void close();
+
+  int majorVersion();
+  int minorVersion();
 
   default java.sql.Connection newJdbcConnection() throws SQLException {
     return newJdbcConnection(conf().dbConf.database);
@@ -57,6 +62,7 @@ public interface EmbeddedDb {
     private final EmbeddedDbConfig conf;
     private final EmbeddedPostgres postgres;
     private final Path dataDir;
+    private final IVersion version;
 
     Yandex(EmbeddedDbConfig conf) {
       this.conf = conf;
@@ -64,7 +70,16 @@ public interface EmbeddedDb {
         dataDir = Files.createTempDirectory(Files.createDirectories(
             Paths.get(System.getProperty("user.home"), ".embedpostgresql/data")), "pg-data-");
       } catch (Exception e) { throw new RuntimeException(e); }
-      postgres = new EmbeddedPostgres(dataDir.toString());
+      IVersion version = Version.Main.PRODUCTION;
+      if (System.getProperty("asyncpg.postgres.version") != null &&
+          !System.getProperty("asyncpg.postgres.version").isEmpty()) {
+        version = () -> System.getProperty("asyncpg.postgres.version");
+      }
+      this.version = version;
+      // Just make sure major and minor versions can parse
+      majorVersion();
+      minorVersion();
+      postgres = new EmbeddedPostgres(version, dataDir.toString());
       IRuntimeConfig runtimeConfig = new DelegatingCommandLineOverrideRuntimeConfig(
           dataDir, EmbeddedPostgres.cachedRuntimeConfig(
               Paths.get(System.getProperty("user.home"), ".embedpostgresql/extracted")),
@@ -100,6 +115,23 @@ public interface EmbeddedDb {
           if (!file.delete()) log.log(Level.WARNING, "Failed to delete {0}", file);
         });
       } catch (IOException e) { log.log(Level.WARNING, "Failed to delete " + dataDir, e); }
+    }
+
+    @Override
+    public int majorVersion() {
+      int dotIndex = version.asInDownloadPath().indexOf('.');
+      if (dotIndex == -1) throw new IllegalArgumentException("Invalid version: " + version.asInDownloadPath());
+      return Integer.parseInt(version.asInDownloadPath().substring(0, dotIndex));
+    }
+
+    @Override
+    public int minorVersion() {
+      int dotIndex = version.asInDownloadPath().indexOf('.');
+      if (dotIndex == -1) throw new IllegalArgumentException("Invalid version: " + version.asInDownloadPath());
+      int minorEndIndex = version.asInDownloadPath().indexOf('.', dotIndex + 1);
+      if (minorEndIndex == -1) minorEndIndex = version.asInDownloadPath().indexOf('-', dotIndex + 1);
+      if (minorEndIndex == -1) throw new IllegalArgumentException("Invalid version: " + version.asInDownloadPath());
+      return Integer.parseInt(version.asInDownloadPath().substring(dotIndex + 1, minorEndIndex));
     }
 
     public static class DelegatingCommandLineOverrideRuntimeConfig
