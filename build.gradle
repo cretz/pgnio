@@ -1,6 +1,3 @@
-group 'pgnio'
-version '0.1.0'
-
 allprojects {
     apply plugin: 'java'
     sourceCompatibility = 1.8
@@ -18,18 +15,30 @@ allprojects {
         from javadoc.destinationDir
         classifier = 'javadoc'
     }
+    task packageSources(type: Jar) {
+        classifier = 'sources'
+        from sourceSets.main.allSource
+    }
     artifacts {
-        archives packageJavadoc
+        archives packageJavadoc, packageSources
     }
 }
 
 project(':driver') {
+    apply plugin: 'maven'
+    apply plugin: 'signing'
+
+    group 'com.github.cretz.pgnio'
+    archivesBaseName = 'pgnio-driver'
+    version '0.1.0'
+
     dependencies {
         testCompile 'junit:junit:4.12'
         testCompile 'org.postgresql:postgresql:42.2.1'
         testCompile 'ru.yandex.qatools.embed:postgresql-embedded:2.8'
         testCompile 'org.slf4j:slf4j-log4j12:1.7.10'
     }
+
     test {
         systemProperty 'java.util.logging.config.file', 'src/test/resources/logging.properties'
         systemProperty 'pgnio.postgres.version', System.getProperty('pgnio.postgres.version')
@@ -38,6 +47,48 @@ project(':driver') {
             showStandardStreams = true
             exceptionFormat = 'full'
             events 'passed', 'skipped', 'failed'
+        }
+    }
+
+    // Deployment stuff
+    signing {
+        sign configurations.archives
+    }
+    uploadArchives {
+        repositories {
+            mavenDeployer {
+                beforeDeployment { MavenDeployment deployment -> signing.signPom(deployment) }
+                repository(url: 'https://oss.sonatype.org/service/local/staging/deploy/maven2/') {
+                    authentication(userName: ossrhUsername, password: ossrhPassword)
+                }
+                snapshotRepository(url: 'https://oss.sonatype.org/content/repositories/snapshots/') {
+                    authentication(userName: ossrhUsername, password: ossrhPassword)
+                }
+                pom.project {
+                    name 'pgnio-driver'
+                    packaging 'jar'
+                    description 'Asynchronous PostgreSQL Java Driver using NIO'
+                    url 'https://github.com/cretz/pgnio'
+                    scm {
+                        connection 'scm:git:git@github.com:cretz/pgnio.git'
+                        developerConnection 'scm:git:git@github.com:cretz/pgnio.git'
+                        url 'git@github.com:cretz/pgnio.git'
+                    }
+                    licenses {
+                        license {
+                            name 'MIT License'
+                            url 'https://opensource.org/licenses/MIT'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id 'cretz'
+                            name 'Chad Retz'
+                            url 'https://github.com/cretz'
+                        }
+                    }
+                }
+            }
         }
     }
 }
