@@ -1,10 +1,10 @@
-# AsyncPG
+# PgNio
 
-AsyncPG is an asynchronous PostgreSQL client for Java and the JVM. It was built to solve both simple and advanced
-Postgres needs without being too opinionated or inflexible. Since all protocol features are supported callers can take
-advanced approaches to problems.
+PgNio is an asynchronous PostgreSQL client for Java and the JVM. It was built to solve both simple and advanced Postgres
+needs without being too opinionated or inflexible. Since all protocol features are supported callers can take advanced
+approaches to problems.
 
-See the latest [Javadoc](https://jitpack.io/com/github/cretz/asyncpg/driver/master-SNAPSHOT/javadoc/) for the driver on
+See the latest [Javadoc](https://jitpack.io/com/github/cretz/pgnio/driver/master-SNAPSHOT/javadoc/) for the driver on
 the master branch (note, lazily generated so may be slow and/or need refresh on initial access). It excludes all
 protected items since they are numerous and for extensibility only. TODO: show maven central javadocs instead once built
 
@@ -31,8 +31,8 @@ TODO: bintray/jcenter or maven central or jitpack once decided
 
 Below are simple examples on how to use the client library. The library makes heavy use of composition with
 `CompletableFuture` values which is why some of the code appears quite functional and non-ergonomic. All top-level
-classes in the library are in the `asyncpg` package. While there are synchronous `get` invocations in these examples,
-in normal use developers might not want to block for a result.
+classes in the library are in the `pgnio` package. While there are synchronous `get` invocations in these examples, in
+normal use developers might not want to block for a result.
 
 #### Create and use a single connection
 
@@ -118,7 +118,7 @@ pool.withConnection(c ->
 
 Rows are returned as `QueryMessage.Row` objects. These objects include metadata about the columns and the two
 dimensional byte array, with a byte array for each column. Instead of putting the logic to convert from byte arrays
-inside the row class, AsyncPG offers a `RowReader` class for reading row data. The class may be manually instantiated
+inside the row class, PgNio offers a `RowReader` class for reading row data. The class may be manually instantiated
 with custom converters, but most common uses will use the `RowReader.DEFAULT` singleton:
 
 ```java
@@ -144,8 +144,8 @@ In the [PostgreSQL protocol](https://www.postgresql.org/docs/current/static/prot
 queries. One is the simple query form which issues a query and gets row metadata and row data. These are the calls
 prefixed with "simple". The other way is the "advanced" or "prepared" approach which separates the steps to parse the
 query, bind parameters, describe the result, and execute the query. The "simple" approach can be seen as just combining
-those 4 steps together in one call on the server side. AsyncPG offers separate calls for each of these steps allowing
-the caller to choose when/how they are called. There are also "prepared" convenience methods analagous to the "simple"
+those 4 steps together in one call on the server side. PgNio offers separate calls for each of these steps allowing the
+caller to choose when/how they are called. There are also "prepared" convenience methods analogous to the "simple"
 convenience methods which invoke all of these steps internally:
 
 ```java
@@ -157,16 +157,16 @@ pool.withConnection(c ->
 ).get();
 ```
 
-Internally, AsyncPG uses a `ParamWriter` instance (configured with a default via `Config.paramWriter`) to convert from
+Internally, PgNio uses a `ParamWriter` instance (configured with a default via `Config.paramWriter`) to convert from
 Java types to PostgreSQL parameters. See the [Data Types](#data-types) for more information on suggested data types for
 certain parameter types.
 
 #### Reuse prepared queries
 
 The prepared queries above are "unnamed" (internally they use an empty string as the name) which means they can't easily
-be reused. AsyncPG supports named prepared queries which are stored for the life of the connection or until closed.
-Unlike unnamed prepared queries, there aren't convenience methods to create a named query, but convenience methods can
-be used for binding, executing, and retrieving rows:
+be reused. PgNio supports named prepared queries which are stored for the life of the connection or until closed. Unlike
+unnamed prepared queries, there aren't convenience methods to create a named query, but convenience methods can be used
+for binding, executing, and retrieving rows:
 
 ```java
 pool.withConnection(c ->
@@ -233,7 +233,7 @@ Transactions can also be nested which is internally supported via savepoints.
 
 #### Listen for notifications
 
-PostgreSQL has `LISTEN`/`NOTIFY` support which allows pub/sub. AsyncPG allows subscription to these messages on a per
+PostgreSQL has `LISTEN`/`NOTIFY` support which allows pub/sub. PgNio allows subscription to these messages on a per
 connection basis. Once subscribed to the messages, it must be read from the server side. This will happen during normal
 query operations since a notification is sent along with other messages. But if not querying, developers need to wait
 while reading for a message, which can be done via `unsolicitedMessageTick` and a timeout.
@@ -270,7 +270,7 @@ creating a longer lived connection or just never giving the connection back to t
 #### Copy to a table
 
 PostgreSQL supports a fast insert mode called a [COPY](https://www.postgresql.org/docs/current/static/sql-copy.html) and
-AsyncPG supports it. Here's how to insert some CSV values:
+PgNio supports it. Here's how to insert some CSV values:
 
 ```java
 pool.withConnection(c ->
@@ -372,7 +372,7 @@ they appear in the [PostgreSQL data type documentation](https://www.postgresql.o
 | `smallserial` | `java.lang.Short` |
 | `serial` | `java.lang.Integer` |
 | `bigserial` | `java.lang.Long` |
-| `money` | `asyncpg.DataType.Money` |
+| `money` | `pgnio.DataType.Money` |
 | `varchar(n)` | `java.lang.String` |
 | `char(n)` | `java.lang.String` |
 | `text` | `java.lang.String` |
@@ -382,20 +382,20 @@ they appear in the [PostgreSQL data type documentation](https://www.postgresql.o
 | `date` | `java.time.LocalDate` |
 | `time without time zone` | `java.time.LocalTime` |
 | `time with time zone` | `java.time.OffsetTime` |
-| `interval` | `asyncpg.DataType.Interval` |
+| `interval` | `pgnio.DataType.Interval` |
 | `boolean` | `java.lang.Boolean` |
 | enumerated types | `java.lang.String` |
-| `point` | `asyncpg.DataType.Point` |
-| `line` | `asyncpg.DataType.Line` |
-| `lseg` | `asyncpg.DataType.LineSegment` |
-| `box` | `asyncpg.DataType.Box` |
-| `path` | `asyncpg.DataType.Path` |
-| `polygon` | `asyncpg.DataType.Polygon` |
-| `circle` | `asyncpg.DataType.Circle` |
-| `inet` | `asyncpg.DataType.Inet` |
-| `cidr` | `asyncpg.DataType.Inet` |
-| `macaddr` | `asyncpg.DataType.MacAddr` |
-| `macaddr8` | `asyncpg.DataType.MacAddr` |
+| `point` | `pgnio.DataType.Point` |
+| `line` | `pgnio.DataType.Line` |
+| `lseg` | `pgnio.DataType.LineSegment` |
+| `box` | `pgnio.DataType.Box` |
+| `path` | `pgnio.DataType.Path` |
+| `polygon` | `pgnio.DataType.Polygon` |
+| `circle` | `pgnio.DataType.Circle` |
+| `inet` | `pgnio.DataType.Inet` |
+| `cidr` | `pgnio.DataType.Inet` |
+| `macaddr` | `pgnio.DataType.MacAddr` |
+| `macaddr8` | `pgnio.DataType.MacAddr` |
 | `bit(n)` | `java.lang.String` |
 | `bit varying(n)` | `java.lang.String` |
 | `tsvector` | `java.lang.String` |
@@ -459,7 +459,7 @@ string if the caller wants to convert further, but it was decided that this libr
 
 #### What about binary formatted parameters and results?
 
-PostgreSQL has two formats in the protocol for parameters and results: binary and text. Right now, AsyncPG only supports
+PostgreSQL has two formats in the protocol for parameters and results: binary and text. Right now, PgNio only supports
 the text format (the default). The text format sends everything as normal strings and is portable across PostgreSQL
 versions. This is usually good enough for almost all purposes. However, as more use cases for binary formatting come
 about, it very well might be implemented in the library. In the meantime, the library is built to be extensible enough
@@ -470,7 +470,7 @@ calls that support specifying text or binary format are exposed to let the calle
 
 #### Style
 
-AsyncPG gladly accepts pull requests. In general the style is two-space indent and try to be clean with line wrapping.
+PgNio gladly accepts pull requests. In general the style is two-space indent and try to be clean with line wrapping.
 Since this is also a library that can be used as a basis for others, we prefer to set the visibility protected instead
 of private or package private for anything that could have any value to anyone. We prefer fields over getters, nested
 classes over a bunch of files, simpler code over longer code, and clarity over confusion.
@@ -481,7 +481,7 @@ runtime checks for this library. Sometimes the initialization constraints get in
 
 #### Building
 
-The project can be built with Gradle. Unlike other projects, AsyncPG does not bundle a Gradle wrapper script with the
+The project can be built with Gradle. Unlike other projects, PgNio does not bundle a Gradle wrapper script with the
 repository. Simply download Gradle to `some/path` and run:
 
     some/path/bin/gradle --no-daemon :driver:assemble
@@ -501,9 +501,9 @@ itself and create directories as needed in `~/.embedpostgresql`. To run all test
 By default it chooses the latest PostgreSQL version configured in the library (`10.2` as of this writing). A different
 version can be used by setting the version number that appears in the
 [download link](https://www.enterprisedb.com/download-postgresql-binaries) as the system property
-`asyncpg.postgres.version`. It is usually just the version with `-1` appended. So to test against `9.6.7`:
+`pgnio.postgres.version`. It is usually just the version with `-1` appended. So to test against `9.6.7`:
 
-    some/path/bin/gradle --no-daemon :driver:test -Dasyncpg.postgres.version=9.6.7-1
+    some/path/bin/gradle --no-daemon :driver:test -Dpgnio.postgres.version=9.6.7-1
 
 Note, on Windows sometimes the process remains open or there are other oddities. Developers may have to kill the
 processes themselves and/or make sure the data files at `~/.embedpostgresql/data` are actually deleted (that is

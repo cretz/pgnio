@@ -1,4 +1,4 @@
-group 'asyncpg'
+group 'pgnio'
 version '0.1.0'
 
 allprojects {
@@ -32,7 +32,7 @@ project(':driver') {
     }
     test {
         systemProperty 'java.util.logging.config.file', 'src/test/resources/logging.properties'
-        systemProperty 'asyncpg.postgres.version', System.getProperty('asyncpg.postgres.version')
+        systemProperty 'pgnio.postgres.version', System.getProperty('pgnio.postgres.version')
         testLogging {
             outputs.upToDateWhen {false}
             showStandardStreams = true

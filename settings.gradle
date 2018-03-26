@@ -1,2 +1,2 @@
-rootProject.name = 'asyncpg'
+rootProject.name = 'pgnio'
 include 'driver'

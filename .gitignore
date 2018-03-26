@@ -3,7 +3,7 @@
 .settings
 /.gradle
 /.idea
-/asyncpg.iml
+/*.iml
 /driver/bin
 /driver/build
 /driver/out
