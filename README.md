@@ -5,6 +5,7 @@ needs without being too opinionated or inflexible. Since all protocol features a
 approaches to problems.
 
 [![Javadocs](http://javadoc.io/badge/com.github.cretz.pgnio/pgnio-driver.svg)](http://javadoc.io/doc/com.github.cretz.pgnio/pgnio-driver)
+(`protected` visibility excluded)
 
 ### Features/Goals
 
