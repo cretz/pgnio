@@ -43,7 +43,6 @@ public class QueryResultConnection<T extends Connection.Started> extends Connect
     char typ = (char) ctx.buf.get();
     ctx.buf.position(5);
     switch (typ) {
-      // TODO: make some of these enums, only put query counters on the ones that need it
       // ParseComplete
       case '1':
         return new QueryMessage.ParseComplete(queryCounter);

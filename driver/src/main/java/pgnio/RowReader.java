@@ -174,7 +174,6 @@ public class RowReader {
       throw new IllegalArgumentException("Array must start with brace");
     ctx.index++;
     QueryMessage.RowMeta.Column subCol = col.child(DataType.arrayComponentOid(col.dataTypeOid));
-    // TODO: what if we don't want sub-arrays to be array types...we don't want to look ahead for the end though
     Class subType;
     if (typ == Object.class) subType = Object.class;
     else if (typ.isArray()) subType = typ.getComponentType();

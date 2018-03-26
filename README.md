@@ -11,7 +11,7 @@ approaches to problems.
 
 * Java 8+
 * Simple and small codebase, no dependencies
-* NIO2 and SSL
+* NIO and SSL
 * Notification support
 * `COPY` support
 * Advanced prepared and bound query support including max-rows and suspension
@@ -143,7 +143,7 @@ pool.withConnection(c ->
             // Can also pass in the zero-based column index
             System.out.println("Col 2: " + RowReader.DEFAULT.get(rows.get(0), 1, Integer.class));
             // Even works with arrays
-            System.out.println("Col 3: " + Arrays.toString(RowReader.DEFAULT.get(rows.get(0), 1, int[].class)));
+            System.out.println("Col 3: " + Arrays.toString(RowReader.DEFAULT.get(rows.get(0), 2, int[].class)));
         })
 ).get();
 ```
@@ -443,7 +443,7 @@ async JDBC API and to develop a deep understanding of the PostgreSQL protocol.
 
 #### Is "asynchronous" or "non-blocking" really better?
 
-No. Sometimes it is when you don't want to use a thread per connection though internally NIO2 leverages thread
+No. Sometimes it is when you don't want to use a thread per connection though internally NIO leverages thread
 groups/pools. Also, since PostgreSQL's protocol doesn't support multiplexing a single connection there is even less
 benefit than there might be with other protocols. Having said that, rarely is it worse and this library could easily be
 used in a higher-level, synchronous, blocking application or library.
@@ -461,7 +461,7 @@ to support generic types, but this may change in the future.
 #### Why don't the conversions look up by implemented interface instead of just superclass?
 
 For the current set of converters, simply traversing the class hierarchy to find a suitable conversion was good enough.
-If there is a need to specific a converter for an interface, this could be supported in the future.
+If there is a need for a converter for an interface, this could be supported in the future.
 
 #### Why can't reading an `hstore` into a `Map` use the key and value types?
 
@@ -483,10 +483,10 @@ calls that support specifying text or binary format are exposed to let the calle
 
 #### Style
 
-PgNio gladly accepts pull requests. In general the style is two-space indent and try to be clean with line wrapping.
-Since this is also a library that can be used as a basis for others, we prefer to set the visibility protected instead
-of private or package private for anything that could have any value to anyone. We prefer fields over getters, nested
-classes over a bunch of files, simpler code over longer code, and clarity over confusion.
+PgNio gladly accepts pull requests. In general the style is two-space indent, 120-char line max, and try to be clean
+with line wrapping ideally with punctuation at the end of the line instead of the start. Since this is also a library
+that can be used as a basis for others, we prefer to set the visibility protected instead of private or package-private
+for anything that could have any value to anyone. We prefer fields over getters, nested classes over a bunch of files, simpler code over longer code, and clarity over confusion.
 
 The [checker framework](https://checkerframework.org/) is used mainly to check nullability. This is preferred over
 runtime checks for this library. Sometimes the initialization constraints get in the way, so feel free to mark code
