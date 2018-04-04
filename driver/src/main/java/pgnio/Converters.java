@@ -24,9 +24,9 @@ public interface Converters {
   }
 
   /** Use {@link ServiceLoader} to load converter sets and return in order of priority (lower first) */
-  static List<Converters> loadConverters(ClassLoader cl) {
+  static List<Converters> loadConverters(@Nullable ClassLoader cl) {
     List<Converters> ret = new ArrayList<>();
-    ServiceLoader.load(Converters.class).iterator().forEachRemaining(ret::add);
+    ServiceLoader.load(Converters.class, cl).iterator().forEachRemaining(ret::add);
     ret.sort(Comparator.comparing(Converters::getPriority));
     return ret;
   }
