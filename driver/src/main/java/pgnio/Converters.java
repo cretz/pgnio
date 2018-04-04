@@ -18,8 +18,13 @@ import static pgnio.DataType.*;
  */
 public interface Converters {
 
-  /** Use {@link ServiceLoader} to load converter sets and return in order of priority (lower first) */
+  /** Shortcut for {@link #loadConverters(ClassLoader)} using this class's class loader */
   static List<Converters> loadConverters() {
+    return loadConverters(Converters.class.getClassLoader());
+  }
+
+  /** Use {@link ServiceLoader} to load converter sets and return in order of priority (lower first) */
+  static List<Converters> loadConverters(ClassLoader cl) {
     List<Converters> ret = new ArrayList<>();
     ServiceLoader.load(Converters.class).iterator().forEachRemaining(ret::add);
     ret.sort(Comparator.comparing(Converters::getPriority));

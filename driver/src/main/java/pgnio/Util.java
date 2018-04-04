@@ -11,7 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-/** Utilities used withing the library that may have use for others */
+/** Utilities used within the library that may have use for others */
 public class Util {
   @SuppressWarnings("type.argument.type.incompatible")
   private static final ThreadLocal<CharsetDecoder> threadLocalStringDecoder = ThreadLocal.withInitial(() ->
