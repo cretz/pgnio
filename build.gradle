@@ -54,6 +54,8 @@ project(':driver') {
     signing {
         sign configurations.archives
     }
+    if (!project.hasProperty('ossrhUsername')) ext.ossrhUsername = 'unknown'
+    if (!project.hasProperty('ossrhPassword')) ext.ossrhPassword = 'unknown'
     uploadArchives {
         repositories {
             mavenDeployer {
