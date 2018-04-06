@@ -192,6 +192,7 @@ public interface Converters {
       from.put(Long.class.getName(), convertTextFromItem(Object::toString));
       from.put(MacAddr.class.getName(), convertTextFromItem(Object::toString));
       from.put(Money.class.getName(), convertTextFromItem(Object::toString));
+      from.put(Number.class.getName(), convertTextFromItem(Object::toString));
       from.put(OffsetDateTime.class.getName(), convertTextFromItem(TIMESTAMPTZ_FORMAT::format));
       from.put(OffsetTime.class.getName(), convertTextFromItem(TIMETZ_FORMAT::format));
       from.put(Path.class.getName(), convertTextFromItem(Object::toString));
