@@ -58,6 +58,12 @@ public class Config {
    * Default is null
    */
   public @Nullable String poolValidationQuery;
+  /**
+   * If true, the {@link ConnectionPool} will immediately connect all connections up front when the pool is created. If
+   * false (the default), connections are only created when first asked for up to {@link #poolSize} pool-borrow
+   * new-connection requests.
+   */
+  public boolean poolConnectEagerly;
   /** Function to connect and authenticate a connection from a config. Default is {@link Connection#authed(Config)} */
   @SuppressWarnings("initialization")
   public Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector = Connection::authed;
@@ -131,6 +137,11 @@ public class Config {
   /** @see #poolValidationQuery */
   public Config poolValidationQuery(String poolValidationQuery) {
     this.poolValidationQuery = poolValidationQuery;
+    return this;
+  }
+  /** @see #poolConnectEagerly */
+  public Config poolConnectEagerly(boolean poolConnectEagerly) {
+    this.poolConnectEagerly = poolConnectEagerly;
     return this;
   }
   /** @see #connector */

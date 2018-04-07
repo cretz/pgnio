@@ -6,6 +6,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public abstract class DbTestBase extends TestBase {
   protected static EmbeddedDb db;
@@ -15,7 +17,11 @@ public abstract class DbTestBase extends TestBase {
     if (db == null) {
       db = EmbeddedDb.newFromConfig(new EmbeddedDb.EmbeddedDbConfig().dbConf(newDefaultConfig()));
       // Add a shutdown hook to close it
-      Runtime.getRuntime().addShutdownHook(new Thread(db::close));
+      Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        // Logs don't log on finalizers, so we'll use stdout
+        if (Logger.getAnonymousLogger().isLoggable(Level.WARNING)) System.out.println("Stopping Postgres");
+        db.close();
+      }));
     }
   }
 

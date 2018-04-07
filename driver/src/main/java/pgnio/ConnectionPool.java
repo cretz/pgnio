@@ -5,6 +5,7 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -22,18 +23,31 @@ public class ConnectionPool implements AutoCloseable {
   protected final Config config;
   protected final BlockingQueue<CompletableFuture<QueryReadyConnection.AutoCommit>> connections;
   protected volatile boolean closed;
+  /**
+   * The number of connections we can still create during {@link #borrowConnection()} if there are none currently
+   * available. This is set to the pool size unless we're eagerly loading at which point it's set to 0. If this value is
+   * 0, borrowing will wait for next queue value.
+   */
+  protected final AtomicInteger remainingNewConnectionsOnBorrow = new AtomicInteger();
 
   /** Create a connection pool for the given connection with a fixed size of {@link Config#poolSize} */
   @SuppressWarnings("initialization")
   public ConnectionPool(Config config) {
     this.config = config;
     connections = new LinkedBlockingQueue<>(config.poolSize);
-    // We'll be somewhat eager here
-    for (int i = 0; i < config.poolSize; i++) {
-      try {
-        connections.put(newConnection());
-      } catch (InterruptedException e) { throw new RuntimeException(e); }
+    // If we are eagerly loading, create all of the connections now
+    if (config.poolConnectEagerly) {
+      log.log(Level.FINE, "Creating {0} pool connections eagerly", config.poolSize);
+      for (int i = 0; i < config.poolSize; i++) {
+        try {
+          connections.put(newConnection());
+        } catch (InterruptedException e) { throw new RuntimeException(e); }
+      }
+    } else {
+      log.log(Level.FINE, "Creating {0} pool connections lazily", config.poolSize);
+      remainingNewConnectionsOnBorrow.set(config.poolSize);
     }
+
   }
 
   /** Shortcut for {@link #borrowConnection(long, TimeUnit)} using configured default timeouts */
@@ -44,17 +58,38 @@ public class ConnectionPool implements AutoCloseable {
   /**
    * Borrow a connection for use. If a connection is not available, this blocks until one is made available or the
    * timeout is reached (which throws an {@link IllegalStateException}). A timeout of zero means wait indefinitely. This
-   * may internally create a new connection if the one that would be returned is no longer open/valid. Developers who
-   * call this directly must make sure to call {@link #returnConnection(QueryReadyConnection.AutoCommit)} when they are
-   * through with the connection (or pass null if they don't want the connection in the pool anymore) even on failure.
-   * For simplicity, developers are encouraged to instead use {@link #withConnection(Function)} when they can.
+   * may internally create a new connection if the one that would be returned is no longer open/valid or if the
+   * connections were not eagerly created and the pool size has not been reached. Developers who call this directly must
+   * make sure to call {@link #returnConnection(QueryReadyConnection.AutoCommit)} when they are through with the
+   * connection (or pass null if they don't want the connection in the pool anymore) even on failure. For simplicity,
+   * developers are encouraged to instead use {@link #withConnection(Function)} when they can.
    */
   public CompletableFuture<QueryReadyConnection.AutoCommit> borrowConnection(long timeout, TimeUnit unit) {
     if (closed) throw new IllegalStateException("Pool is closed");
-    CompletableFuture<QueryReadyConnection.AutoCommit> fut;
+    CompletableFuture<QueryReadyConnection.AutoCommit> fut = null;
     try {
-      fut = timeout == 0L ? connections.take() : connections.poll(timeout, unit);
-      if (fut == null) throw new IllegalStateException("Timeout waiting for connection");
+      // If there are some remaining for first creation, we can create anew instead of waiting
+      if (remainingNewConnectionsOnBorrow.get() > 0) {
+        fut = connections.poll();
+        if (fut == null) {
+          int preDecrementValue = remainingNewConnectionsOnBorrow.getAndDecrement();
+          if (preDecrementValue > 0) {
+            // Non-blocking get, then create since we have room
+            if (log.isLoggable(Level.FINE))
+              log.log(Level.FINE,
+                  "No connections available; lazily creating one, {0} connections remaining to be lazily created",
+                  preDecrementValue - 1);
+            fut = newConnection();
+          } else {
+            remainingNewConnectionsOnBorrow.set(0);
+          }
+        }
+      }
+      // If the above didn't happen, we have to block on reading from the queue
+      if (fut == null) {
+        fut = timeout == 0L ? connections.take() : connections.poll(timeout, unit);
+        if (fut == null) throw new IllegalStateException("Timeout waiting for connection");
+      }
     } catch (InterruptedException e) { throw new RuntimeException(e); }
     // Throw if not open so a new one is made
     fut = fut.thenApply(conn -> {
