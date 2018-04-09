@@ -30,14 +30,14 @@ This is deployed to Maven Central. In maven project:
 <dependency>
     <groupId>com.github.cretz.pgnio</groupId>
     <artifactId>pgnio-driver</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
 Or in Gradle:
 
 ```
-compile 'com.github.cretz.pgnio:pgnio-driver:0.1.0'
+compile 'com.github.cretz.pgnio:pgnio-driver:0.2.0'
 ```
 
 ### How To

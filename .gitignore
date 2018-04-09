@@ -4,6 +4,7 @@
 /.gradle
 /.idea
 /*.iml
+/build
 /driver/bin
 /driver/build
 /driver/out
