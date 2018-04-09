@@ -522,6 +522,12 @@ Note, on Windows sometimes the process remains open or there are other oddities.
 processes themselves and/or make sure the data files at `~/.embedpostgresql/data` are actually deleted (that is
 the `C:\Users\username\.embedpostgresql\data` directory).
 
+#### Using Latest Master
+
+For updates that may not have been released into a numbered version, developers can use
+[JitPack](https://jitpack.io/#cretz/pgnio/master-SNAPSHOT). Essentially this means using the JitPack resolver in the
+build tool, and setting a dependency on the group `com.github.cretz.pgnio`, name `pgnio`, and version `master-SNAPSHOT`.
+
 ### TODO
 
 * Streaming/logical replication
