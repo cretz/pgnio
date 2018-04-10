@@ -1,7 +1,5 @@
 allprojects {
     apply plugin: 'java'
-    sourceCompatibility = 1.8
-    targetCompatibility = 1.8
     repositories {
         mavenCentral()
     }
@@ -25,6 +23,8 @@ allprojects {
 }
 
 project(':driver') {
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
     apply plugin: 'maven'
     apply plugin: 'signing'
 
@@ -95,6 +95,31 @@ project(':driver') {
     }
 }
 
+project(':adba') {
+    sourceCompatibility = 1.9
+    targetCompatibility = 1.9
+    dependencies {
+        implementation project(':driver')
+        implementation files(System.getProperty('adba.jar.path') ?: 'some/path/to/adba.jar')
+    }
+    ext.moduleName = 'pgnio.adba'
+    compileJava {
+        inputs.property('moduleName', moduleName)
+        doFirst {
+            if (System.getProperty('adba.jar.path') == null) {
+                throw new InvalidUserDataException('Must provide the adba.jar.path system property when compiling adba')
+            }
+            options.compilerArgs = ['--module-path', classpath.asPath]
+            classpath = files()
+        }
+    }
+    javadoc {
+        doFirst {
+            options.addStringOption '-module-path', classpath.asPath
+        }
+    }
+}
+
 // Checker framework integration
 allprojects {
     configurations {
@@ -111,14 +136,19 @@ allprojects {
 
     compileJava {
         doFirst {
-            options.compilerArgs = [
-                '-processorpath', configurations.checkerFrameworkCheckerJar.asPath,
-                '-processor', 'org.checkerframework.checker.nullness.NullnessChecker',
-                '-Xmaxerrs', '10000',
-                // Assuming side effect free to prevent multi-field null checks from assuming nullness is changed
-                '-AassumeSideEffectFree',
-                '-Xbootclasspath/p:' + configurations.checkerFrameworkAnnotatedJdk.asPath
-            ]
+            if (JavaVersion.current() > JavaVersion.VERSION_1_8) {
+                // TODO: waiting on https://github.com/typetools/checker-framework/issues/1224
+                project.logger.warn('WARN: Not performing checker framework checks because Java version is > 8')
+            } else {
+                options.compilerArgs = [
+                    '-processorpath', configurations.checkerFrameworkCheckerJar.asPath,
+                    '-processor', 'org.checkerframework.checker.nullness.NullnessChecker',
+                    '-Xmaxerrs', '10000',
+                    // Assuming side effect free to prevent multi-field null checks from assuming nullness is changed
+                    '-AassumeSideEffectFree',
+                    '-Xbootclasspath/p:' + configurations.checkerFrameworkAnnotatedJdk.asPath
+                ]
+            }
         }
     }
 }

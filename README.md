@@ -526,7 +526,29 @@ the `C:\Users\username\.embedpostgresql\data` directory).
 
 For updates that may not have been released into a numbered version, developers can use
 [JitPack](https://jitpack.io/#cretz/pgnio/master-SNAPSHOT). Essentially this means using the JitPack resolver in the
-build tool, and setting a dependency on the group `com.github.cretz.pgnio`, name `pgnio`, and version `master-SNAPSHOT`.
+build tool, and setting a dependency on the group `com.github.cretz`, name `pgnio`, and version `master-SNAPSHOT`.
+
+#### Java 9+
+
+When using Java 9 or newer to compile, the checker framework
+[cannot perform checks](https://github.com/typetools/checker-framework/issues/1224) so it is disabled. For this reason,
+developers ar encouraged to use Java 8 when compiling the `driver` project.
+
+#### ADBA Support
+
+Asynchronous database access support (a.k.a. ADBA, JDBC-Next, async JDBC, java.sql2, etc) is currently in development
+in the `adba` subproject which uses Java 9. This means that Java 9+ must be used to compile it which, as mentioned
+above, disables checker framework checks.
+
+ADBA support requires the ADBA source which is available from the
+[OpenJDK sandbox](http://hg.openjdk.java.net/jdk/sandbox/file/9d3b0eb749a9/src/jdk.incubator.adba) as of this writing.
+Developers have to compile it to use it; [here](https://gist.github.com/cretz/fb21718d2456fe5d581c9d536c011d99) is a
+`build.gradle` script that will build the ADBA JAR when `assemble` is run. Once the JAR is available, the full path to
+the JAR must be set as the `adba.jar.path` system property when running the `adba` build in this project. E.g.:
+
+    some/path/bin/gradle --no-daemon :adba:assemble -Dadba.jar.path=/full/path/to/jdk.incubator.adba.jar
+
+Or if you are using an IDE such as IntelliJ this can be set as a Gradle option in the settings.
 
 ### TODO
 
