@@ -39,6 +39,12 @@ project(':driver') {
         testCompile 'org.slf4j:slf4j-log4j12:1.7.10'
     }
 
+    jar {
+        manifest {
+            attributes('Automatic-Module-Name': 'pgnio')
+        }
+    }
+
     test {
         systemProperty 'java.util.logging.config.file', 'src/test/resources/logging.properties'
         systemProperty 'pgnio.postgres.version', System.getProperty('pgnio.postgres.version')
@@ -99,8 +105,8 @@ project(':adba') {
     sourceCompatibility = 1.9
     targetCompatibility = 1.9
     dependencies {
-        implementation project(':driver')
-        implementation files(System.getProperty('adba.jar.path') ?: 'some/path/to/adba.jar')
+        compile project(':driver')
+        compile files(System.getProperty('adba.jar.path') ?: 'some/path/to/adba.jar')
     }
     ext.moduleName = 'pgnio.adba'
     compileJava {
