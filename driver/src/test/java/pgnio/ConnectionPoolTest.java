@@ -6,6 +6,7 @@ import org.junit.Test;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
 
 public class ConnectionPoolTest extends DbTestBase {
   @Test
@@ -44,8 +45,15 @@ public class ConnectionPoolTest extends DbTestBase {
 
   @Test
   public void testDifferentPidAfterExternallyTerminated() throws Exception {
-    assertDifferentPidAfterExternallyTerminated(true);
-    assertDifferentPidAfterExternallyTerminated(false);
+    // Stop showing warnings here
+    Level oldLevel = ConnectionPool.log.getLevel();
+    ConnectionPool.log.setLevel(Level.SEVERE);
+    try {
+      assertDifferentPidAfterExternallyTerminated(true);
+      assertDifferentPidAfterExternallyTerminated(false);
+    } finally {
+      ConnectionPool.log.setLevel(oldLevel);
+    }
   }
 
   protected void assertDifferentPidAfterExternallyTerminated(boolean eager) throws Exception {
@@ -129,5 +137,51 @@ public class ConnectionPoolTest extends DbTestBase {
       // Get the connection count from outside the pool
       Assert.assertEquals(3L, withConnectionSync(this::getConnectionCount).longValue());
     }
+  }
+
+  @Test
+  public void testConnectionClosedWhenReturnedToClosedPool() throws Exception {
+    // Create a pool, get a connection, close the pool
+    ConnectionPool pool = new ConnectionPool(newDefaultConfig().poolSize(1));
+    QueryReadyConnection.AutoCommit connOutsideClosedPool = pool.borrowConnection().get();
+    pool.close();
+    // The connection should still work
+    Assert.assertEquals(1, RowReader.DEFAULT.get(
+        connOutsideClosedPool.simpleQueryRows("SELECT 1").get().get(0), 0, Integer.class).intValue());
+    // Check count (which includes the connection requesting it)
+    Assert.assertEquals(2L, withConnectionSync(this::getConnectionCount).longValue());
+    // Now return the connection
+    try {
+      pool.returnConnection(connOutsideClosedPool);
+      Assert.fail();
+    } catch (IllegalStateException e) {
+      // Check count again to make sure closed
+      Assert.assertEquals(1L, withConnectionSync(this::getConnectionCount).longValue());
+    }
+  }
+
+  @Test
+  public void testConnectionNotClosedWhenReturnedToClosedPool() throws Exception {
+    // Create a pool, get a connection, close the pool
+    ConnectionPool pool = new ConnectionPool(newDefaultConfig().poolSize(1).
+        poolCloseReturnedConnectionOnClosedPool(false));
+    QueryReadyConnection.AutoCommit connOutsideClosedPool = pool.borrowConnection().get();
+    pool.close();
+    // The connection should still work
+    Assert.assertEquals(1, RowReader.DEFAULT.get(
+        connOutsideClosedPool.simpleQueryRows("SELECT 1").get().get(0), 0, Integer.class).intValue());
+    // Check count (which includes the connection requesting it)
+    Assert.assertEquals(2L, withConnectionSync(this::getConnectionCount).longValue());
+    // Now return the connection
+    try {
+      pool.returnConnection(connOutsideClosedPool);
+      Assert.fail();
+    } catch (IllegalStateException e) {
+      // Check still works and count again
+      Assert.assertEquals(1, RowReader.DEFAULT.get(
+          connOutsideClosedPool.simpleQueryRows("SELECT 1").get().get(0), 0, Integer.class).intValue());
+      Assert.assertEquals(2L, withConnectionSync(this::getConnectionCount).longValue());
+    }
+    connOutsideClosedPool.close();
   }
 }

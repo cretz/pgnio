@@ -124,11 +124,23 @@ public class ConnectionPool implements AutoCloseable {
   /**
    * Return a connection to the pool. If the given connection is null or not open, a new connection is added to the pool
    * instead. This should never block so long as {@link #borrowConnection()} was previously called. For simplicity,
-   * developers are encouraged to use {@link #withConnection(Function)} instead.
+   * developers are encouraged to use {@link #withConnection(Function)} instead. If a connection is returned on a closed
+   * pool, by default it is closed first (ref {@link Config#poolCloseReturnedConnectionOnClosedPool}), then an
+   * {@link IllegalStateException} is thrown.
    */
   @SuppressWarnings("dereference.of.nullable")
   public void returnConnection(QueryReadyConnection.@Nullable AutoCommit conn) {
-    if (closed) throw new IllegalStateException("Pool is closed");
+    if (closed) {
+      if (conn != null && conn.ctx.io.isOpen() && config.poolCloseReturnedConnectionOnClosedPool) {
+        log.log(Level.FINE, "Connection returned to closed pool, attempting to close");
+        try {
+          conn.close();
+        } catch (Exception e) {
+          throw new IllegalStateException("Pool is closed, also failed closing returned connection", e);
+        }
+      }
+      throw new IllegalStateException("Pool is closed");
+    }
     try {
       // Only put back if still open. No, we don't deal with errors here before creating a new connection.
       // This is because it becomes too complicated, instead we just make the next take fail.

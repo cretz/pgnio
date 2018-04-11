@@ -64,6 +64,10 @@ public class Config {
    * new-connection requests.
    */
   public boolean poolConnectEagerly;
+  /**
+   * If true (the default), connections that are returned to a closed pool are closed before the exception is thrown.
+   */
+  public boolean poolCloseReturnedConnectionOnClosedPool = true;
   /** Function to connect and authenticate a connection from a config. Default is {@link Connection#authed(Config)} */
   @SuppressWarnings("initialization")
   public Function<Config, CompletableFuture<QueryReadyConnection.AutoCommit>> connector = Connection::authed;
@@ -142,6 +146,11 @@ public class Config {
   /** @see #poolConnectEagerly */
   public Config poolConnectEagerly(boolean poolConnectEagerly) {
     this.poolConnectEagerly = poolConnectEagerly;
+    return this;
+  }
+  /** @see #poolCloseReturnedConnectionOnClosedPool */
+  public Config poolCloseReturnedConnectionOnClosedPool(boolean poolCloseReturnedConnectionOnClosedPool) {
+    this.poolCloseReturnedConnectionOnClosedPool = poolCloseReturnedConnectionOnClosedPool;
     return this;
   }
   /** @see #connector */
