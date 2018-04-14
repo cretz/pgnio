@@ -93,7 +93,7 @@ public class ConnectionPool implements AutoCloseable {
     } catch (InterruptedException e) { throw new RuntimeException(e); }
     // Throw if not open so a new one is made
     fut = fut.thenApply(conn -> {
-      if (!conn.ctx.io.isOpen()) throw new IllegalStateException("Not open");
+      if (!conn.isOpen()) throw new IllegalStateException("Not open");
       return conn;
     });
     // If there is a validation query, run it and terminate on failure
@@ -131,7 +131,7 @@ public class ConnectionPool implements AutoCloseable {
   @SuppressWarnings("dereference.of.nullable")
   public void returnConnection(QueryReadyConnection.@Nullable AutoCommit conn) {
     if (closed) {
-      if (conn != null && conn.ctx.io.isOpen() && config.poolCloseReturnedConnectionOnClosedPool) {
+      if (conn != null && conn.isOpen() && config.poolCloseReturnedConnectionOnClosedPool) {
         log.log(Level.FINE, "Connection returned to closed pool, attempting to close");
         try {
           conn.close();
@@ -144,7 +144,7 @@ public class ConnectionPool implements AutoCloseable {
     try {
       // Only put back if still open. No, we don't deal with errors here before creating a new connection.
       // This is because it becomes too complicated, instead we just make the next take fail.
-      if (conn == null || !conn.ctx.io.isOpen()) {
+      if (conn == null || !conn.isOpen()) {
         connections.put(newConnection());
       } else {
         // We have to remove all subscriptions

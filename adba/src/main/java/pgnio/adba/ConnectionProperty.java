@@ -4,23 +4,19 @@ import jdk.incubator.sql2.AdbaConnectionProperty;
 import jdk.incubator.sql2.Operation;
 import jdk.incubator.sql2.OperationGroup;
 import org.checkerframework.checker.nullness.qual.Nullable;
-import pgnio.Config;
 
-import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.util.Objects;
-import java.util.function.BiFunction;
+import java.util.function.BiConsumer;
 import java.util.function.Function;
 
-public interface ConnectionProperty
-    extends jdk.incubator.sql2.ConnectionProperty, BiFunction<Config, Object, Config> {
+public interface ConnectionProperty extends jdk.incubator.sql2.ConnectionProperty, BiConsumer<Config, Object> {
 
-  /** Should return the same config instance passed in */
   @Override
-  Config apply(Config config, Object val);
+  void accept(Config config, Object o);
 
   static @Nullable ConnectionProperty fromConnectionProperty(jdk.incubator.sql2.ConnectionProperty property) {
     if (property instanceof ConnectionProperty) return (ConnectionProperty) property;
@@ -55,14 +51,16 @@ public interface ConnectionProperty
     CONNECTOR("connector"),
     IO_CONNECTOR("ioConnector"),
     SSL_CONTEXT_OVERRIDE("sslContextOverride"),
-    SSL_WRAPPER("sslWrapper");
+    SSL_WRAPPER("sslWrapper"),
+    NETWORK_SERVER_VALIDATION_QUERY("networkServerValidationQuery"),
+    COMPLETE_VALIDATION_QUERY("completeValidationQuery");
 
     protected final ConnectionProperty delegate;
 
     Property(String fieldName) { delegate = Simple.fromConfigField(name(), fieldName); }
 
     @Override
-    public Config apply(Config config, Object o) { return delegate.apply(config, o); }
+    public void accept(Config config, Object o) { delegate.accept(config, o); }
     @Override
     public Class<?> range() { return delegate.range(); }
     @Override
@@ -82,15 +80,16 @@ public interface ConnectionProperty
     @SuppressWarnings("unchecked")
     protected static Simple fromConfigField(String name, String fieldName) {
       try {
-        Field field = ConnectionProperty.class.getDeclaredField(fieldName);
+        Field field = Config.class.getField(fieldName);
         Class<?> range = field.getType().isPrimitive() ?
             pgnio.Util.boxedClassFromPrimitive(field.getType()) : field.getType();
-        MethodType setterType = MethodType.methodType(ConnectionProperty.class, field.getType());
-        MethodHandles.Lookup setterLookup = MethodHandles.lookup();
-        MethodHandle setter = setterLookup.findVirtual(ConnectionProperty.class, fieldName, setterType);
-        BiFunction<Config, Object, Config> apply = (BiFunction<Config, Object, Config>)
-            LambdaMetafactory.metafactory(setterLookup, fieldName, MethodType.methodType(BiFunction.class),
-                setterType.generic(), setter, setterType).getTarget().invokeExact();
+        MethodHandle setter = MethodHandles.lookup().
+            findVirtual(field.getDeclaringClass(), fieldName,
+                MethodType.methodType(field.getDeclaringClass(), field.getType()));
+        BiConsumer<Config, Object> apply = (conf, val) -> {
+          try { setter.invoke(conf, val); }
+          catch (Throwable e) { throw new RuntimeException(e); }
+        };
         Object defaultValue = field.get(defaultConfig);
         return new Simple(name, range, apply, defaultValue, null, "password".equals(fieldName));
       } catch (Throwable e) {
@@ -100,12 +99,12 @@ public interface ConnectionProperty
 
     protected final String name;
     protected final Class<?> range;
-    protected final BiFunction<Config, Object, Config> apply;
+    protected final BiConsumer<Config, Object> apply;
     protected final @Nullable Object defaultValue;
     protected final @Nullable Function<Object, Boolean> validator;
     protected final boolean sensitive;
 
-    public Simple(String name, Class<?> range, BiFunction<Config, Object, Config> apply,
+    public Simple(String name, Class<?> range, BiConsumer<Config, Object> apply,
         @Nullable Object defaultValue, @Nullable Function<Object, Boolean> validator, boolean sensitive) {
       this.name = name;
       this.range = range;
@@ -116,7 +115,7 @@ public interface ConnectionProperty
     }
 
     @Override
-    public Config apply(Config config, Object value) { return apply.apply(config, value); }
+    public void accept(Config config, Object value) { apply.accept(config, value); }
     @Override
     public String name() { return name; }
     @Override

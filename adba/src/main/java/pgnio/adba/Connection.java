@@ -3,11 +3,11 @@ package pgnio.adba;
 import jdk.incubator.sql2.ShardingKey;
 import jdk.incubator.sql2.SqlException;
 import jdk.incubator.sql2.Transaction;
-import pgnio.Config;
 import pgnio.QueryReadyConnection;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 public class Connection extends OperationGroup<Object, Object> implements jdk.incubator.sql2.Connection {
   protected final Config config;
@@ -23,16 +23,14 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
   @Override
   public Operation<Void> connectOperation() {
     if (lifecycle != Lifecycle.NEW) throw new IllegalStateException("Invalid lifecycle");
-    return new Operation<Void>(this, this, () -> {
+    return new Operation<>(this, this, () -> {
       if (lifecycle != Lifecycle.NEW && lifecycle != Lifecycle.NEW_INACTIVE)
         throw new SqlException("Invalid lifecycle", null, null, -1, null, -1);
       return pgnio.Connection.authed(config).whenComplete((pgConn, err) -> {
         if (err != null) {
           lifecycle = Lifecycle.CLOSED;
         } else {
-          if (lifecycle == Lifecycle.NEW) lifecycle = Lifecycle.OPEN;
-          else if (lifecycle == Lifecycle.NEW_INACTIVE) lifecycle = Lifecycle.INACTIVE;
-          else throw new SqlException("Invalid lifecycle", null, null, -1, null, -1);
+          lifecycle = lifecycle.connect();
           this.pgConn = pgConn;
         }
       }).thenApply(__ -> null);
@@ -41,12 +39,33 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
 
   @Override
   public Operation<Void> validationOperation(Validation depth) {
-    return null;
+    if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
+    return new Operation<>(this, this, () -> {
+      switch (depth) {
+        case NONE:
+        case LOCAL:
+        case SOCKET:
+          if (!pgConn.isOpen()) throw new IllegalStateException("Connection not open");
+          return CompletableFuture.completedFuture(null);
+        case NETWORK:
+        case SERVER:
+          return pgConn.simpleQueryExec(config.networkServerValidationQuery).thenApply(__ -> null);
+        case COMPLETE:
+          return pgConn.simpleQueryExec(config.completeValidationQuery).thenApply(__ -> null);
+        default: throw new AssertionError();
+      }
+    });
   }
 
   @Override
   public Operation<Void> closeOperation() {
-    return null;
+    if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
+    Operation<Void> ret = new Operation<>(this, this, () -> {
+      lifecycle = lifecycle.close();
+      return pgConn.terminate().thenAccept(__ -> lifecycle = lifecycle.closed());
+    });
+    ret.unskippable = true;
+    return ret;
   }
 
   @Override
@@ -126,8 +145,8 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
       built = true;
       Config conf = new Config();
       properties.forEach((prop, val) -> {
-        ConnectionProperty pgnioProp = ConnectionProperty.fromConnectionProperty(prop);
-        if (pgnioProp != null) pgnioProp.apply(conf, val);
+        ConnectionProperty connProp = ConnectionProperty.fromConnectionProperty(prop);
+        if (connProp != null) connProp.accept(conf, val);
       });
       return new Connection(conf);
     }

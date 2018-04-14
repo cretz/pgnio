@@ -37,6 +37,9 @@ public abstract class Connection implements AutoCloseable {
 
   protected Connection(Context ctx) { this.ctx = ctx; }
 
+  /** Whether the underlying socket is seen as closed. */
+  public boolean isOpen() { return ctx.io.isOpen(); }
+
   /** Calls {@link #terminate()} and waits for a response */
   @Override
   public void close() throws ExecutionException, InterruptedException { terminate().get(); }
