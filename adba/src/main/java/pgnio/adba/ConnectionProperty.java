@@ -4,6 +4,7 @@ import jdk.incubator.sql2.AdbaConnectionProperty;
 import jdk.incubator.sql2.Operation;
 import jdk.incubator.sql2.OperationGroup;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import pgnio.Config;
 
 import java.lang.invoke.LambdaMetafactory;
 import java.lang.invoke.MethodHandle;
@@ -15,7 +16,11 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 public interface ConnectionProperty
-    extends jdk.incubator.sql2.ConnectionProperty, BiFunction<pgnio.Config, Object, pgnio.Config> {
+    extends jdk.incubator.sql2.ConnectionProperty, BiFunction<Config, Object, Config> {
+
+  /** Should return the same config instance passed in */
+  @Override
+  Config apply(Config config, Object val);
 
   static @Nullable ConnectionProperty fromConnectionProperty(jdk.incubator.sql2.ConnectionProperty property) {
     if (property instanceof ConnectionProperty) return (ConnectionProperty) property;
@@ -57,7 +62,7 @@ public interface ConnectionProperty
     Property(String fieldName) { delegate = Simple.fromConfigField(name(), fieldName); }
 
     @Override
-    public pgnio.Config apply(pgnio.Config config, Object o) { return delegate.apply(config, o); }
+    public Config apply(Config config, Object o) { return delegate.apply(config, o); }
     @Override
     public Class<?> range() { return delegate.range(); }
     @Override
@@ -73,7 +78,7 @@ public interface ConnectionProperty
   }
 
   class Simple implements ConnectionProperty {
-    protected static final pgnio.Config defaultConfig = new pgnio.Config();
+    protected static final Config defaultConfig = new Config();
     @SuppressWarnings("unchecked")
     protected static Simple fromConfigField(String name, String fieldName) {
       try {
@@ -83,7 +88,7 @@ public interface ConnectionProperty
         MethodType setterType = MethodType.methodType(ConnectionProperty.class, field.getType());
         MethodHandles.Lookup setterLookup = MethodHandles.lookup();
         MethodHandle setter = setterLookup.findVirtual(ConnectionProperty.class, fieldName, setterType);
-        BiFunction<pgnio.Config, Object, pgnio.Config> apply = (BiFunction<pgnio.Config, Object, pgnio.Config>)
+        BiFunction<Config, Object, Config> apply = (BiFunction<Config, Object, Config>)
             LambdaMetafactory.metafactory(setterLookup, fieldName, MethodType.methodType(BiFunction.class),
                 setterType.generic(), setter, setterType).getTarget().invokeExact();
         Object defaultValue = field.get(defaultConfig);
@@ -95,12 +100,12 @@ public interface ConnectionProperty
 
     protected final String name;
     protected final Class<?> range;
-    protected final BiFunction<pgnio.Config, Object, pgnio.Config> apply;
+    protected final BiFunction<Config, Object, Config> apply;
     protected final @Nullable Object defaultValue;
     protected final @Nullable Function<Object, Boolean> validator;
     protected final boolean sensitive;
 
-    public Simple(String name, Class<?> range, BiFunction<pgnio.Config, Object, pgnio.Config> apply,
+    public Simple(String name, Class<?> range, BiFunction<Config, Object, Config> apply,
         @Nullable Object defaultValue, @Nullable Function<Object, Boolean> validator, boolean sensitive) {
       this.name = name;
       this.range = range;
@@ -111,7 +116,7 @@ public interface ConnectionProperty
     }
 
     @Override
-    public pgnio.Config apply(pgnio.Config config, Object value) { return apply.apply(config, value); }
+    public Config apply(Config config, Object value) { return apply.apply(config, value); }
     @Override
     public String name() { return name; }
     @Override
