@@ -536,6 +536,9 @@ developers ar encouraged to use Java 8 when compiling the `driver` project.
 
 #### ADBA Support
 
+**NOTE: Work on ADBA support has been suspended. See [this issue](https://github.com/cretz/pgnio/issues/8) for more
+info.**
+
 Asynchronous database access support (a.k.a. ADBA, JDBC-Next, async JDBC, java.sql2, etc) is currently in development
 in the `adba` subproject which uses Java 9. This means that Java 9+ must be used to compile it which, as mentioned
 above, disables checker framework checks.

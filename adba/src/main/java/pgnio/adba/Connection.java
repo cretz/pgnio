@@ -5,19 +5,23 @@ import jdk.incubator.sql2.SqlException;
 import jdk.incubator.sql2.Transaction;
 import pgnio.QueryReadyConnection;
 
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public class Connection extends OperationGroup<Object, Object> implements jdk.incubator.sql2.Connection {
   protected final Config config;
-  protected Lifecycle lifecycle;
+  protected final Map<jdk.incubator.sql2.ConnectionProperty, Object> properties;
+  protected final Set<ConnectionLifecycleListener> lifecycleListeners = new HashSet<>();
+  protected Lifecycle lifecycle = Lifecycle.NEW;
   protected QueryReadyConnection.AutoCommit pgConn;
 
-  public Connection(Config config) {
+  public Connection(Config config, Map<ConnectionProperty, Object> properties) {
     super(null, null);
     this.config = config;
-    lifecycle = Lifecycle.NEW;
+    // The set of properties is the default properties + non-sensitive given properties overrides
+    Map<ConnectionProperty, Object> props = new HashMap<>(ConnectionProperty.Property.PROPERTIES_WITH_DEFAULTS);
+    properties.forEach((prop, val) -> { if (!prop.isSensitive()) props.put(prop, val); });
+    this.properties = Collections.unmodifiableMap(props);
   }
 
   @Override
@@ -28,9 +32,9 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
         throw new SqlException("Invalid lifecycle", null, null, -1, null, -1);
       return pgnio.Connection.authed(config).whenComplete((pgConn, err) -> {
         if (err != null) {
-          lifecycle = Lifecycle.CLOSED;
+          setLifecycle(Lifecycle.CLOSED);
         } else {
-          lifecycle = lifecycle.connect();
+          setLifecycle(lifecycle.connect());
           this.pgConn = pgConn;
         }
       }).thenApply(__ -> null);
@@ -60,62 +64,75 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
   @Override
   public Operation<Void> closeOperation() {
     if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
-    Operation<Void> ret = new Operation<>(this, this, () -> {
-      lifecycle = lifecycle.close();
-      return pgConn.terminate().thenAccept(__ -> lifecycle = lifecycle.closed());
-    });
-    ret.unskippable = true;
-    return ret;
+    return new Operation<>(this, this, () -> {
+      setLifecycle(lifecycle.close());
+      return pgConn.terminate().thenAccept(__ -> setLifecycle(lifecycle.closed()));
+    }).unskippable(true);
   }
 
   @Override
-  public <S, T> jdk.incubator.sql2.OperationGroup<S, T> operationGroup() {
-    return null;
+  public <S, T> OperationGroup<S, T> operationGroup() {
+    if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
+    // TODO: do I need "this" operation group to be passed in below as the parent?
+    return new OperationGroup<>(this, null);
   }
 
   @Override
   public Transaction transaction() {
-    return null;
+    throw new UnsupportedOperationException("TODO");
   }
 
   @Override
-  public jdk.incubator.sql2.Connection registerLifecycleListener(ConnectionLifecycleListener listener) {
-    return null;
+  public Connection registerLifecycleListener(ConnectionLifecycleListener listener) {
+    if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
+    lifecycleListeners.add(listener);
+    return this;
   }
 
   @Override
-  public jdk.incubator.sql2.Connection deregisterLifecycleListener(ConnectionLifecycleListener listener) {
-    return null;
+  public Connection deregisterLifecycleListener(ConnectionLifecycleListener listener) {
+    if (!lifecycle.isActive()) throw new IllegalStateException("Invalid lifecycle");
+    lifecycleListeners.remove(listener);
+    return this;
   }
 
   @Override
-  public Lifecycle getConnectionLifecycle() {
-    return null;
+  public Lifecycle getConnectionLifecycle() { return lifecycle; }
+
+  @Override
+  public Connection abort() {
+    throw new UnsupportedOperationException("TODO");
   }
 
   @Override
-  public jdk.incubator.sql2.Connection abort() {
-    return null;
-  }
-
-  @Override
-  public Map<jdk.incubator.sql2.ConnectionProperty, Object> getProperties() {
-    return null;
-  }
+  public Map<jdk.incubator.sql2.ConnectionProperty, Object> getProperties() { return properties; }
 
   @Override
   public ShardingKey.Builder shardingKeyBuilder() {
-    return null;
+    throw new UnsupportedOperationException("TODO");
   }
 
   @Override
-  public jdk.incubator.sql2.Connection activate() {
-    return null;
+  public Connection activate() {
+    if (!lifecycle.isOpen()) throw new IllegalStateException("Invalid lifecycle");
+    setLifecycle(lifecycle.activate());
+    return this;
   }
 
   @Override
-  public jdk.incubator.sql2.Connection deactivate() {
-    return null;
+  public Connection deactivate() {
+    if (!lifecycle.isOpen()) throw new IllegalStateException("Invalid lifecycle");
+    // TODO: reset the connection?
+    setLifecycle(lifecycle.deactivate());
+    return this;
+  }
+
+  protected void setLifecycle(Lifecycle lifecycle) {
+    if (this.lifecycle != lifecycle) {
+      Lifecycle prev = this.lifecycle;
+      this.lifecycle = lifecycle;
+      lifecycleListeners.forEach(l -> l.lifecycleEvent(this, prev, lifecycle));
+    }
   }
 
   public static class Builder implements jdk.incubator.sql2.Connection.Builder {
@@ -144,11 +161,15 @@ public class Connection extends OperationGroup<Object, Object> implements jdk.in
       if (built) throw new IllegalStateException("Already built");
       built = true;
       Config conf = new Config();
+      Map<ConnectionProperty, Object> usedProps = new HashMap<>();
       properties.forEach((prop, val) -> {
         ConnectionProperty connProp = ConnectionProperty.fromConnectionProperty(prop);
-        if (connProp != null) connProp.accept(conf, val);
+        if (connProp != null) {
+          usedProps.put(connProp, val);
+          connProp.accept(conf, val);
+        }
       });
-      return new Connection(conf);
+      return new Connection(conf, usedProps);
     }
   }
 }

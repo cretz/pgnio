@@ -9,15 +9,11 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
-import java.util.Objects;
+import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
 
 public interface ConnectionProperty extends jdk.incubator.sql2.ConnectionProperty, BiConsumer<Config, Object> {
-
-  @Override
-  void accept(Config config, Object o);
-
   static @Nullable ConnectionProperty fromConnectionProperty(jdk.incubator.sql2.ConnectionProperty property) {
     if (property instanceof ConnectionProperty) return (ConnectionProperty) property;
     if (!(property instanceof AdbaConnectionProperty)) return null;
@@ -54,6 +50,17 @@ public interface ConnectionProperty extends jdk.incubator.sql2.ConnectionPropert
     SSL_WRAPPER("sslWrapper"),
     NETWORK_SERVER_VALIDATION_QUERY("networkServerValidationQuery"),
     COMPLETE_VALIDATION_QUERY("completeValidationQuery");
+
+    public static final Map<Property, Object> PROPERTIES_WITH_DEFAULTS;
+
+    static {
+      Map<Property, Object> map = new EnumMap<>(Property.class);
+      for (Property prop : values()) {
+        Object defaultValue = prop.defaultValue();
+        if (defaultValue != null) map.put(prop, defaultValue);
+      }
+      PROPERTIES_WITH_DEFAULTS = Collections.unmodifiableMap(map);
+    }
 
     protected final ConnectionProperty delegate;
 

@@ -52,10 +52,16 @@ public class Operation<T> implements jdk.incubator.sql2.Operation<T> {
     return group.submitOperation(operation, unskippable);
   }
 
+  public Operation<T> unskippable(boolean unskippable) {
+    assertNotSubmitted();
+    this.unskippable = unskippable;
+    return this;
+  }
+
   public static class Catch<T> extends Operation<T> {
     protected Catch(Connection conn, OperationGroup<T, ?> group) {
       super(conn, group, () -> CompletableFuture.completedFuture(null));
-      unskippable = true;
+      unskippable(true);
     }
 
     @Override
