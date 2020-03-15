@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermission;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -170,6 +171,12 @@ public interface EmbeddedDb {
                 Files.readAllBytes(Paths.get(getClass().getResource("keys/server.crt").toURI())));
             Files.write(dataDir.resolve("server.key"),
                 Files.readAllBytes(Paths.get(getClass().getResource("keys/server.key").toURI())));
+            try {
+              Set<PosixFilePermission> perms = new HashSet<PosixFilePermission>();
+              perms.add(PosixFilePermission.OWNER_READ);
+              perms.add(PosixFilePermission.OWNER_WRITE);
+              Files.setPosixFilePermissions(dataDir.resolve("server.key"), perms);
+            } catch (Exception ex) { }
           } catch (Exception e) { throw new RuntimeException(e); }
           // As a special case, if this is "runas" on Windows then we have to
           //  add these as string pieces inside the last quote

@@ -2,6 +2,9 @@ package pgnio;
 
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import pgnio.QueryReadyConnection.AutoCommit;
+
+import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -22,6 +25,7 @@ public class ConnectionPool implements AutoCloseable {
   protected static final Logger log = Logger.getLogger(ConnectionPool.class.getName());
   protected final Config config;
   protected final BlockingQueue<CompletableFuture<QueryReadyConnection.AutoCommit>> connections;
+  protected final ConcurrentLinkedDeque<QueryReadyConnection.AutoCommit> opened;
   protected volatile boolean closed;
   /**
    * The number of connections we can still create during {@link #borrowConnection()} if there are none currently
@@ -35,6 +39,7 @@ public class ConnectionPool implements AutoCloseable {
   public ConnectionPool(Config config) {
     this.config = config;
     connections = new LinkedBlockingQueue<>(config.poolSize);
+    opened = new ConcurrentLinkedDeque<>();
     // If we are eagerly loading, create all of the connections now
     if (config.poolConnectEagerly) {
       log.log(Level.FINE, "Creating {0} pool connections eagerly", config.poolSize);
@@ -69,20 +74,15 @@ public class ConnectionPool implements AutoCloseable {
     CompletableFuture<QueryReadyConnection.AutoCommit> fut = null;
     try {
       // If there are some remaining for first creation, we can create anew instead of waiting
-      if (remainingNewConnectionsOnBorrow.get() > 0) {
-        fut = connections.poll();
-        if (fut == null) {
-          int preDecrementValue = remainingNewConnectionsOnBorrow.getAndDecrement();
-          if (preDecrementValue > 0) {
-            // Non-blocking get, then create since we have room
-            if (log.isLoggable(Level.FINE))
-              log.log(Level.FINE,
-                  "No connections available; lazily creating one, {0} connections remaining to be lazily created",
-                  preDecrementValue - 1);
-            fut = newConnection();
-          } else {
-            remainingNewConnectionsOnBorrow.set(0);
-          }
+      fut = connections.poll();
+      if (fut == null) {
+        int decrementedValue;
+        if ((decrementedValue = remainingNewConnectionsOnBorrow.getAndUpdate(i -> Math.max(0, i-1))) > 0) {
+          if (log.isLoggable(Level.FINE))
+            log.log(Level.FINE,
+                "No connections available; lazily creating one, {0} connections remaining to be lazily created",
+                decrementedValue);
+          fut = newConnection();
         }
       }
       // If the above didn't happen, we have to block on reading from the queue
@@ -118,7 +118,9 @@ public class ConnectionPool implements AutoCloseable {
   }
 
   protected CompletableFuture<QueryReadyConnection.AutoCommit> newConnection() {
-    return config.connector.apply(config);
+    CompletableFuture<AutoCommit> answer = config.connector.apply(config);
+    answer.thenAccept(opened::add);
+    return answer;
   }
 
   /**
@@ -148,11 +150,17 @@ public class ConnectionPool implements AutoCloseable {
         connections.put(newConnection());
       } else {
         // We have to remove all subscriptions
-        connections.put(conn.fullReset().whenComplete((__, ___) -> {
+        conn.fullReset().whenComplete((__, ___) -> {
           conn.notices().unsubscribeAll();
           conn.notifications().unsubscribeAll();
           conn.parameterStatuses().unsubscribeAll();
-        }));
+          if(!connections.add(CompletableFuture.completedFuture(conn)) ) {
+            try {
+              remainingNewConnectionsOnBorrow.incrementAndGet();
+              conn.close();
+            } catch (ExecutionException | InterruptedException e) {}
+          }
+        });
       }
     } catch (InterruptedException e) { throw new RuntimeException(e); }
   }
@@ -175,7 +183,12 @@ public class ConnectionPool implements AutoCloseable {
       Function<QueryReadyConnection.AutoCommit, CompletableFuture<T>> fn) {
     return borrowConnection(waitForConnTimeout, waitForConnUnit).
         // Handle exception early even on borrow
-        whenComplete((__, ex) -> { if (ex != null) returnConnection(null); }).
+        whenComplete((conn, ex) -> {
+          if (ex != null) {
+            opened.remove(conn);
+            returnConnection(null);
+          }
+        }).
         // Otherwise release no matter what happens in fn
         thenCompose(conn -> {
           // Make the call, wrapping even direct exceptions into the future
@@ -196,14 +209,23 @@ public class ConnectionPool implements AutoCloseable {
   /** Empty the pool, mark it closed, and terminate all connections being held */
   public CompletableFuture<Void> terminateAll() {
     closed = true;
-    List<CompletableFuture<QueryReadyConnection.AutoCommit>> futs = new ArrayList<>();
-    connections.drainTo(futs);
-    CompletableFuture[] closedFuts = new CompletableFuture[futs.size()];
-    for (int i = 0; i < closedFuts.length; i++) closedFuts[i] = futs.get(i).thenCompose(Connection::terminate);
+    List<QueryReadyConnection.AutoCommit> futs = new ArrayList<>(opened);
+    CompletableFuture<?>[] closedFuts = new CompletableFuture[opened.size()];
+    for (int i = 0; i < closedFuts.length; i++) closedFuts[i] = futs.get(i).terminate();
+    opened.clear();
+    connections.clear();
     return CompletableFuture.allOf(closedFuts);
   }
 
   /** Call {@link #terminateAll()} and wait for completion */
   @Override
-  public void close() throws ExecutionException, InterruptedException { terminateAll().get(); }
+  public void close() throws ExecutionException, InterruptedException {
+    try {
+      terminateAll().get();
+    } catch(ExecutionException e) {
+      if(!(e.getCause() instanceof ClosedChannelException)) {
+        throw e;
+      }
+    }
+  }
 }

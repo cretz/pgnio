@@ -5,6 +5,7 @@ import org.junit.Test;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
@@ -98,13 +99,21 @@ public class ConnectionPoolTest extends DbTestBase {
     try (ConnectionPool pool = new ConnectionPool(newDefaultConfig().poolSize(5))) {
       CountDownLatch firstLatch = new CountDownLatch(1);
       CountDownLatch secondLatch = new CountDownLatch(1);
-      CompletableFuture<Long> firstCount = pool.withConnection(c -> waitOn(getConnectionCount(c), firstLatch));
-      CompletableFuture<Long> secondCount = pool.withConnection(c ->
-          waitOn(secondLatch).thenCompose(__ -> getConnectionCount(c)));
-      firstLatch.countDown();
+      CompletableFuture<Long> firstCount = new CompletableFuture<>();
+      pool.withConnection(c -> {
+        try {
+		  firstCount.complete(getConnectionCount(c).get());
+		} catch (InterruptedException | ExecutionException e) {
+		  firstCount.completeExceptionally(e);
+		}
+        return waitOn(firstLatch);
+      });
+      CompletableFuture<Long> secondCount = firstCount.thenCompose(____-> pool.withConnection(c ->
+          waitOn(secondLatch).thenCompose(__ -> getConnectionCount(c))));
       Assert.assertEquals(1L, firstCount.get().longValue());
       secondLatch.countDown();
       Assert.assertEquals(2L, secondCount.get().longValue());
+      firstLatch.countDown();
     }
   }
 
