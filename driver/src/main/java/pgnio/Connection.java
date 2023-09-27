@@ -1,13 +1,21 @@
 package pgnio;
 
+import com.ongres.scram.client.ScramClient;
+import com.ongres.scram.client.ScramSession;
+import com.ongres.scram.common.exception.ScramInvalidServerSignatureException;
+import com.ongres.scram.common.exception.ScramParseException;
+import com.ongres.scram.common.exception.ScramServerErrorException;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +24,9 @@ import java.util.function.Function;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import static com.ongres.scram.client.ScramClient.ChannelBinding.NO;
+import static com.ongres.scram.common.stringprep.StringPreparations.NO_PREPARATION;
 
 /** Base class for all connections. Implementations are instances of either {@link Startup} or {@link Started} */
 public abstract class Connection implements AutoCloseable {
@@ -318,6 +329,49 @@ public abstract class Connection implements AutoCloseable {
           case 3: return sendClearTextPassword();
           // AuthenticationMD5Password
           case 5: return sendMd5Password(ctx.buf.get(), ctx.buf.get(), ctx.buf.get(), ctx.buf.get());
+          // AuthenticationSASL
+          case 10:
+            List<String> methods = new ArrayList<>();
+            for (String method = ctx.bufReadString(); method.length() > 0; method = ctx.bufReadString()) {
+              methods.add(method);
+            }
+            return sendScramSha256(methods.toArray(new String[0]));
+          // Other...
+          default: throw new IllegalArgumentException("Unrecognized auth response type: " + authType);
+        }
+      });
+    }
+
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> readAuthScramResponse(ScramSession scramSession, ScramSession.ClientFinalProcessor clientFinalProcessor) {
+      return readNonGeneralBackendMessage().thenCompose(__ -> {
+        char typ = (char) ctx.buf.get();
+        if (typ != 'R') throw new IllegalArgumentException("Unrecognized auth response message: " + typ);
+        // Skip the length, grab the auth type
+        ctx.buf.position(5);
+        int authType = ctx.buf.getInt();
+        if (log.isLoggable(Level.FINE))
+          log.log(Level.FINE, "{0} Got auth response of type {1}", new Object[] { ctx, authType });
+        switch (authType) {
+          // AuthenticationOk
+          case 0: return readPostAuthResponse();
+          // AuthenticationCleartextPassword
+          // AuthenticationSASL
+          case 10:
+            List<String> methods = new ArrayList<>();
+            for (String method = ctx.bufReadString(); method.length() > 0; method = ctx.bufReadString()) {
+              methods.add(method);
+            }
+            return sendScramSha256(methods.toArray(new String[0]));
+          // AuthenticationSASLContinue
+          case 11:
+            byte[] buffer = new byte[ctx.buf.remaining()];
+            ctx.buf.get(buffer);
+            return sendScramSha256Continue(StandardCharsets.UTF_8.decode(ByteBuffer.wrap(buffer)).toString(), scramSession);
+          // AuthenticationSASLFinal
+          case 12:
+            buffer = new byte[ctx.buf.remaining()];
+            ctx.buf.get(buffer);
+            return sendScramSha256Final(StandardCharsets.UTF_8.decode(ByteBuffer.wrap(buffer)).toString(), scramSession, clientFinalProcessor);
           // Other...
           default: throw new IllegalArgumentException("Unrecognized auth response type: " + authType);
         }
@@ -349,6 +403,57 @@ public abstract class Connection implements AutoCloseable {
       ctx.writeBytes(hash).writeByte((byte) 0).writeLengthIntEnd();
       ctx.buf.flip();
       return writeFrontendMessage().thenCompose(__ -> readAuthResponse());
+    }
+
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> sendScramSha256(String... methods) {
+      if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
+      ctx.buf.clear();
+      ScramClient scramClient = ScramClient
+              .channelBinding(NO)
+              .stringPreparation(NO_PREPARATION)
+              .selectMechanismBasedOnServerAdvertised(methods)
+              .setup();
+
+      ScramSession scramSession = scramClient.scramSession(ctx.config.username);
+      ctx.writeByte((byte) 'p').writeLengthIntBegin()
+              .writeCString(scramClient.getScramMechanism().getName())
+              .writeInt(scramSession.clientFirstMessage().length())
+              .writeString(scramSession.clientFirstMessage())
+              .writeLengthIntEnd();
+      ctx.buf.flip();
+
+      return writeFrontendMessage().thenCompose(__ -> readAuthScramResponse(scramSession, null));
+    }
+
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> sendScramSha256Continue(String message, ScramSession scramSession) {
+      if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
+      ctx.buf.clear();
+      try {
+        ScramSession.ClientFinalProcessor clientFinalProcessor = scramSession
+                .receiveServerFirstMessage(message)
+                .clientFinalProcessor(String.valueOf(ctx.config.password));
+
+        ctx.writeByte((byte) 'p').writeLengthIntBegin()
+                .writeString(clientFinalProcessor.clientFinalMessage())
+                .writeLengthIntEnd();
+        ctx.buf.flip();
+
+        return writeFrontendMessage().thenCompose(__ -> readAuthScramResponse(scramSession, clientFinalProcessor));
+      } catch (ScramParseException e) {
+        throw new RuntimeException(e);
+      }
+    }
+
+    protected CompletableFuture<QueryReadyConnection.AutoCommit> sendScramSha256Final(String message, ScramSession scramSession, ScramSession.ClientFinalProcessor clientFinalProcessor) {
+      if (ctx.config.password == null) throw new IllegalStateException("Password requested, none provided");
+      ctx.buf.clear();
+      try {
+        clientFinalProcessor.receiveServerFinalMessage(message);
+        ctx.buf.flip();
+        return writeFrontendMessage().thenCompose(__ -> readAuthScramResponse(scramSession, clientFinalProcessor));
+      } catch (ScramParseException | ScramServerErrorException | ScramInvalidServerSignatureException e) {
+        throw new RuntimeException(e);
+      }
     }
 
     protected CompletableFuture<QueryReadyConnection.AutoCommit> readPostAuthResponse() {
